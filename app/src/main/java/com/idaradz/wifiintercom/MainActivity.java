@@ -21,12 +21,16 @@ import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ListView;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
+import java.util.Locale;
 
 public class MainActivity extends Activity {
 
@@ -37,6 +41,8 @@ public class MainActivity extends Activity {
     private final int DISCOVERY_PORT = 55556;
 
     private final String BROADCAST_IP = "255.255.255.255";
+
+    private final String CHANNEL = "GENERAL";
 
     private final String deviceName = Build.MODEL;
 
@@ -49,6 +55,8 @@ public class MainActivity extends Activity {
     private ArrayAdapter<String> adapter;
 
     private TextView status;
+
+    private TextView logs;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -66,7 +74,7 @@ public class MainActivity extends Activity {
 
         root.setOrientation(LinearLayout.VERTICAL);
 
-        root.setPadding(35, 55, 35, 35);
+        root.setPadding(30,50,30,30);
 
         root.setBackgroundColor(
                 Color.parseColor("#EAF4FB")
@@ -80,13 +88,19 @@ public class MainActivity extends Activity {
 
         title.setTextColor(Color.BLACK);
 
-        title.setPadding(0,0,0,15);
+        TextView channel = new TextView(this);
+
+        channel.setText("📻 القناة: " + CHANNEL);
+
+        channel.setTextSize(16);
+
+        channel.setTextColor(Color.parseColor("#1565C0"));
+
+        channel.setPadding(0,10,0,10);
 
         TextView info = new TextView(this);
 
-        info.setText(
-                "📱 " + deviceName
-        );
+        info.setText("📱 " + deviceName);
 
         info.setTextSize(16);
 
@@ -102,8 +116,6 @@ public class MainActivity extends Activity {
 
         online.setTextColor(Color.BLACK);
 
-        online.setPadding(0,0,0,20);
-
         ListView listView = new ListView(this);
 
         adapter = new ArrayAdapter<>(
@@ -118,9 +130,9 @@ public class MainActivity extends Activity {
 
         status.setText("🟢 جاهز للتحدث");
 
-        status.setTextSize(18);
-
         status.setGravity(Gravity.CENTER);
+
+        status.setTextSize(18);
 
         status.setPadding(0,20,0,20);
 
@@ -141,12 +153,40 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams btnParams =
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
-                        260
+                        240
                 );
 
-        btnParams.setMargins(0,20,0,0);
+        btnParams.setMargins(0,20,0,20);
+
+        TextView logsTitle = new TextView(this);
+
+        logsTitle.setText("📜 سجل النشاط");
+
+        logsTitle.setTextSize(18);
+
+        logsTitle.setTextColor(Color.BLACK);
+
+        logsTitle.setPadding(0,20,0,10);
+
+        ScrollView scrollView = new ScrollView(this);
+
+        logs = new TextView(this);
+
+        logs.setTextColor(Color.DKGRAY);
+
+        logs.setTextSize(14);
+
+        logs.setPadding(20,20,20,20);
+
+        logs.setBackgroundColor(
+                Color.parseColor("#DDEAF5")
+        );
+
+        scrollView.addView(logs);
 
         root.addView(title);
+
+        root.addView(channel);
 
         root.addView(info);
 
@@ -156,7 +196,7 @@ public class MainActivity extends Activity {
                 listView,
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
-                        350
+                        300
                 )
         );
 
@@ -164,7 +204,19 @@ public class MainActivity extends Activity {
 
         root.addView(ptt, btnParams);
 
+        root.addView(logsTitle);
+
+        root.addView(
+                scrollView,
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        350
+                )
+        );
+
         setContentView(root);
+
+        log("تم تشغيل التطبيق");
 
         startVoiceReceiver();
 
@@ -189,6 +241,8 @@ public class MainActivity extends Activity {
                         Color.parseColor("#D32F2F")
                 );
 
+                log("بدأ الإرسال الصوتي");
+
                 startVoiceSender();
 
                 return true;
@@ -209,6 +263,8 @@ public class MainActivity extends Activity {
                         Color.parseColor("#2196F3")
                 );
 
+                log("تم إيقاف الإرسال");
+
                 return true;
             }
 
@@ -216,12 +272,32 @@ public class MainActivity extends Activity {
         });
     }
 
+    private void log(String text) {
+
+        runOnUiThread(() -> {
+
+            String time =
+                    new SimpleDateFormat(
+                            "HH:mm:ss",
+                            Locale.getDefault()
+                    ).format(new Date());
+
+            logs.append(
+                    "[" + time + "] "
+                            + text + "\n"
+            );
+        });
+    }
+
     private void vibrate(int ms) {
 
         Vibrator vibrator =
-                (Vibrator) getSystemService(VIBRATOR_SERVICE);
+                (Vibrator) getSystemService(
+                        VIBRATOR_SERVICE
+                );
 
         if (vibrator != null) {
+
             vibrator.vibrate(ms);
         }
     }
@@ -256,12 +332,14 @@ public class MainActivity extends Activity {
                     );
 
             if (NoiseSuppressor.isAvailable()) {
+
                 NoiseSuppressor.create(
                         recorder.getAudioSessionId()
                 );
             }
 
             if (AcousticEchoCanceler.isAvailable()) {
+
                 AcousticEchoCanceler.create(
                         recorder.getAudioSessionId()
                 );
@@ -315,6 +393,8 @@ public class MainActivity extends Activity {
 
             } catch (Exception e) {
 
+                log("خطأ في الإرسال");
+
                 e.printStackTrace();
             }
 
@@ -333,34 +413,35 @@ public class MainActivity extends Activity {
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
 
-                player = new AudioTrack.Builder()
-                        .setAudioAttributes(
-                                new AudioAttributes.Builder()
-                                        .setUsage(
-                                                AudioAttributes.USAGE_MEDIA
-                                        )
-                                        .setContentType(
-                                                AudioAttributes.CONTENT_TYPE_SPEECH
-                                        )
-                                        .build()
-                        )
-                        .setAudioFormat(
-                                new AudioFormat.Builder()
-                                        .setEncoding(
-                                                AudioFormat.ENCODING_PCM_16BIT
-                                        )
-                                        .setSampleRate(
-                                                sampleRate
-                                        )
-                                        .setChannelMask(
-                                                AudioFormat.CHANNEL_OUT_MONO
-                                        )
-                                        .build()
-                        )
-                        .setBufferSizeInBytes(
-                                bufferSize
-                        )
-                        .build();
+                player =
+                        new AudioTrack.Builder()
+                                .setAudioAttributes(
+                                        new AudioAttributes.Builder()
+                                                .setUsage(
+                                                        AudioAttributes.USAGE_MEDIA
+                                                )
+                                                .setContentType(
+                                                        AudioAttributes.CONTENT_TYPE_SPEECH
+                                                )
+                                                .build()
+                                )
+                                .setAudioFormat(
+                                        new AudioFormat.Builder()
+                                                .setEncoding(
+                                                        AudioFormat.ENCODING_PCM_16BIT
+                                                )
+                                                .setSampleRate(
+                                                        sampleRate
+                                                )
+                                                .setChannelMask(
+                                                        AudioFormat.CHANNEL_OUT_MONO
+                                                )
+                                                .build()
+                                )
+                                .setBufferSizeInBytes(
+                                        bufferSize
+                                )
+                                .build();
 
             } else {
 
@@ -386,6 +467,8 @@ public class MainActivity extends Activity {
 
                 player.play();
 
+                log("مستقبل الصوت يعمل");
+
                 while (true) {
 
                     DatagramPacket packet =
@@ -407,6 +490,8 @@ public class MainActivity extends Activity {
                 }
 
             } catch (Exception e) {
+
+                log("خطأ في الاستقبال");
 
                 e.printStackTrace();
             }
@@ -446,7 +531,7 @@ public class MainActivity extends Activity {
                                     data,
                                     data.length,
                                     address,
-                                    DISCOVERY_PORT
+                                    55556
                             );
 
                     socket.send(packet);
@@ -455,6 +540,8 @@ public class MainActivity extends Activity {
                 }
 
             } catch (Exception e) {
+
+                log("خطأ اكتشاف الأجهزة");
 
                 e.printStackTrace();
             }
@@ -522,6 +609,11 @@ public class MainActivity extends Activity {
 
                                         adapter.notifyDataSetChanged();
                                     });
+
+                                    log(
+                                            "تم اكتشاف جهاز: "
+                                                    + incomingName
+                                    );
                                 }
                             }
                         }
@@ -529,6 +621,8 @@ public class MainActivity extends Activity {
                 }
 
             } catch (Exception e) {
+
+                log("خطأ مستقبل الأجهزة");
 
                 e.printStackTrace();
             }
