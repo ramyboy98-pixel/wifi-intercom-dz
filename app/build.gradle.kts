@@ -16,9 +16,9 @@ android {
 
         targetSdk = 36
 
-        versionCode = 5
+        versionCode = 6
 
-        versionName = "5.0"
+        versionName = "6.0"
     }
 
     buildTypes {
