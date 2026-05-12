@@ -9,46 +9,37 @@ import android.media.audiofx.NoiseSuppressor;
 
 public class AudioEngine {
 
-    public static final int SAMPLE_RATE =
-            16000;
+    public static final int SAMPLE_RATE = 16000;
+    public static final int AUDIO_CHUNK = 960;
 
-    public static AudioRecord createRecorder(){
+    public static AudioRecord createRecorder() {
 
-        int bufferSize =
-                AudioRecord.getMinBufferSize(
-                        SAMPLE_RATE,
-                        AudioFormat.CHANNEL_IN_MONO,
-                        AudioFormat.ENCODING_PCM_16BIT
-                );
+        int minBuffer = AudioRecord.getMinBufferSize(
+                SAMPLE_RATE,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT
+        );
 
-        AudioRecord recorder =
-                new AudioRecord(
-                        MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-                        SAMPLE_RATE,
-                        AudioFormat.CHANNEL_IN_MONO,
-                        AudioFormat.ENCODING_PCM_16BIT,
-                        bufferSize
-                );
+        int bufferSize = Math.max(minBuffer, AUDIO_CHUNK * 4);
 
-        if(NoiseSuppressor.isAvailable()){
+        AudioRecord recorder = new AudioRecord(
+                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                SAMPLE_RATE,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                bufferSize
+        );
 
-            NoiseSuppressor.create(
-                    recorder.getAudioSessionId()
-            );
+        if (NoiseSuppressor.isAvailable()) {
+            NoiseSuppressor.create(recorder.getAudioSessionId());
         }
 
-        if(AcousticEchoCanceler.isAvailable()){
-
-            AcousticEchoCanceler.create(
-                    recorder.getAudioSessionId()
-            );
+        if (AcousticEchoCanceler.isAvailable()) {
+            AcousticEchoCanceler.create(recorder.getAudioSessionId());
         }
 
-        if(AutomaticGainControl.isAvailable()){
-
-            AutomaticGainControl.create(
-                    recorder.getAudioSessionId()
-            );
+        if (AutomaticGainControl.isAvailable()) {
+            AutomaticGainControl.create(recorder.getAudioSessionId());
         }
 
         return recorder;
