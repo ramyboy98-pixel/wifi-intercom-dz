@@ -2,6 +2,10 @@ package com.idaradz.wifiintercom;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.content.Context;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.media.AudioAttributes;
@@ -14,6 +18,7 @@ import android.media.audiofx.AcousticEchoCanceler;
 import android.media.audiofx.NoiseSuppressor;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.PowerManager;
 import android.os.Vibrator;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -23,6 +28,8 @@ import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.ScrollView;
 import android.widget.TextView;
+
+import androidx.core.app.NotificationCompat;
 
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
@@ -60,6 +67,8 @@ public class MainActivity extends Activity {
 
     private TextView channelText;
 
+    private PowerManager.WakeLock wakeLock;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
 
@@ -71,6 +80,10 @@ public class MainActivity extends Activity {
                 },
                 10
         );
+
+        keepCpuAlive();
+
+        createNotification();
 
         LinearLayout root = new LinearLayout(this);
 
@@ -112,12 +125,10 @@ public class MainActivity extends Activity {
 
         info.setTextColor(Color.DKGRAY);
 
-        info.setPadding(0,0,0,15);
-
-        LinearLayout channelsLayout =
+        LinearLayout channels =
                 new LinearLayout(this);
 
-        channelsLayout.setOrientation(
+        channels.setOrientation(
                 LinearLayout.HORIZONTAL
         );
 
@@ -137,13 +148,13 @@ public class MainActivity extends Activity {
 
         storageBtn.setText("STORAGE");
 
-        channelsLayout.addView(generalBtn);
+        channels.addView(generalBtn);
 
-        channelsLayout.addView(kitchenBtn);
+        channels.addView(kitchenBtn);
 
-        channelsLayout.addView(securityBtn);
+        channels.addView(securityBtn);
 
-        channelsLayout.addView(storageBtn);
+        channels.addView(storageBtn);
 
         TextView online = new TextView(this);
 
@@ -223,7 +234,7 @@ public class MainActivity extends Activity {
 
         root.addView(info);
 
-        root.addView(channelsLayout);
+        root.addView(channels);
 
         root.addView(online);
 
@@ -253,13 +264,21 @@ public class MainActivity extends Activity {
 
         log("تم تشغيل النظام");
 
-        generalBtn.setOnClickListener(v -> switchChannel("GENERAL"));
+        generalBtn.setOnClickListener(
+                v -> switchChannel("GENERAL")
+        );
 
-        kitchenBtn.setOnClickListener(v -> switchChannel("KITCHEN"));
+        kitchenBtn.setOnClickListener(
+                v -> switchChannel("KITCHEN")
+        );
 
-        securityBtn.setOnClickListener(v -> switchChannel("SECURITY"));
+        securityBtn.setOnClickListener(
+                v -> switchChannel("SECURITY")
+        );
 
-        storageBtn.setOnClickListener(v -> switchChannel("STORAGE"));
+        storageBtn.setOnClickListener(
+                v -> switchChannel("STORAGE")
+        );
 
         startVoiceReceiver();
 
@@ -284,7 +303,8 @@ public class MainActivity extends Activity {
                         Color.parseColor("#D32F2F")
                 );
 
-                log("بدأ الإرسال على قناة " + currentChannel);
+                log("بدأ الإرسال على قناة "
+                        + currentChannel);
 
                 startVoiceSender();
 
@@ -300,7 +320,9 @@ public class MainActivity extends Activity {
 
                 status.setText("🟢 جاهز للتحدث");
 
-                ptt.setText("🎙️ اضغط مطولاً للتحدث");
+                ptt.setText(
+                        "🎙️ اضغط مطولاً للتحدث"
+                );
 
                 ptt.setBackgroundColor(
                         Color.parseColor("#2196F3")
@@ -315,15 +337,77 @@ public class MainActivity extends Activity {
         });
     }
 
+    private void keepCpuAlive() {
+
+        PowerManager powerManager =
+                (PowerManager) getSystemService(
+                        Context.POWER_SERVICE
+                );
+
+        wakeLock =
+                powerManager.newWakeLock(
+                        PowerManager.PARTIAL_WAKE_LOCK,
+                        "wifiintercom:wakelock"
+                );
+
+        wakeLock.acquire();
+    }
+
+    private void createNotification() {
+
+        String channelId = "wifi_intercom";
+
+        NotificationManager manager =
+                (NotificationManager)
+                        getSystemService(
+                                NOTIFICATION_SERVICE
+                        );
+
+        if (Build.VERSION.SDK_INT
+                >= Build.VERSION_CODES.O) {
+
+            NotificationChannel channel =
+                    new NotificationChannel(
+                            channelId,
+                            "WiFi Intercom",
+                            NotificationManager.IMPORTANCE_LOW
+                    );
+
+            manager.createNotificationChannel(
+                    channel
+            );
+        }
+
+        Notification notification =
+                new NotificationCompat.Builder(
+                        this,
+                        channelId
+                )
+                        .setContentTitle(
+                                "WiFi Intercom DZ"
+                        )
+                        .setContentText(
+                                "📡 التطبيق يعمل"
+                        )
+                        .setSmallIcon(
+                                android.R.drawable.presence_audio_online
+                        )
+                        .build();
+
+        manager.notify(1, notification);
+    }
+
     private void switchChannel(String channel) {
 
         currentChannel = channel;
 
         channelText.setText(
-                "📻 القناة الحالية: " + currentChannel
+                "📻 القناة الحالية: "
+                        + currentChannel
         );
 
-        log("تم التبديل إلى قناة " + channel);
+        log("تم التبديل إلى "
+                + channel);
     }
 
     private void log(String text) {
@@ -478,8 +562,6 @@ public class MainActivity extends Activity {
             } catch (Exception e) {
 
                 log("خطأ في الإرسال");
-
-                e.printStackTrace();
             }
 
         }).start();
@@ -495,7 +577,8 @@ public class MainActivity extends Activity {
 
             AudioTrack player;
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            if (Build.VERSION.SDK_INT
+                    >= Build.VERSION_CODES.LOLLIPOP) {
 
                 player =
                         new AudioTrack.Builder()
@@ -616,8 +699,6 @@ public class MainActivity extends Activity {
             } catch (Exception e) {
 
                 log("خطأ مستقبل الصوت");
-
-                e.printStackTrace();
             }
 
         }).start();
@@ -733,7 +814,9 @@ public class MainActivity extends Activity {
 
                                     runOnUiThread(() -> {
 
-                                        devices.add(finalName);
+                                        devices.add(
+                                                finalName
+                                        );
 
                                         adapter.notifyDataSetChanged();
                                     });
