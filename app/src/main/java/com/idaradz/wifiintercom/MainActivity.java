@@ -18,6 +18,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 
 import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -41,8 +42,6 @@ public class MainActivity extends Activity {
 
     private AudioRecord recorder;
 
-    private boolean talking = false;
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
 
@@ -65,12 +64,23 @@ public class MainActivity extends Activity {
         currentChannel =
                 settings.getChannel();
 
-        startService(
+        Intent serviceIntent =
                 new Intent(
                         this,
                         VoiceService.class
-                )
-        );
+                );
+
+        if(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O){
+
+            ContextCompat.startForegroundService(
+                    this,
+                    serviceIntent
+            );
+
+        }else{
+
+            startService(serviceIntent);
+        }
 
         recorder =
                 AudioEngine.createRecorder();
@@ -82,12 +92,7 @@ public class MainActivity extends Activity {
                 LinearLayout.VERTICAL
         );
 
-        root.setPadding(
-                25,
-                45,
-                25,
-                25
-        );
+        root.setPadding(25,45,25,25);
 
         root.setBackgroundColor(
                 Color.parseColor("#101418")
@@ -100,9 +105,7 @@ public class MainActivity extends Activity {
                 "📡 WiFi Intercom PRO"
         );
 
-        title.setTextColor(
-                Color.WHITE
-        );
+        title.setTextColor(Color.WHITE);
 
         title.setTextSize(30);
 
@@ -133,17 +136,14 @@ public class MainActivity extends Activity {
         channelView.setTextSize(18);
 
         channelView.setPadding(
-                0,
-                10,
-                0,
-                20
+                0,10,0,20
         );
 
         EditText usernameInput =
                 new EditText(this);
 
         usernameInput.setHint(
-                "اسم المستخدم"
+                "Username"
         );
 
         usernameInput.setText(
@@ -156,7 +156,7 @@ public class MainActivity extends Activity {
 
         Button saveUser =
                 buildButton(
-                        "💾 SAVE USERNAME",
+                        "SAVE USERNAME",
                         "#1E88E5"
                 );
 
@@ -235,10 +235,7 @@ public class MainActivity extends Activity {
         status.setTextSize(20);
 
         status.setPadding(
-                0,
-                20,
-                0,
-                20
+                0,20,0,20
         );
 
         Button ptt =
@@ -253,8 +250,6 @@ public class MainActivity extends Activity {
 
             if(event.getAction()
                     == MotionEvent.ACTION_DOWN){
-
-                talking = true;
 
                 vibrate();
 
@@ -275,8 +270,6 @@ public class MainActivity extends Activity {
 
             if(event.getAction()
                     == MotionEvent.ACTION_UP){
-
-                talking = false;
 
                 recorder.stop();
 
@@ -307,10 +300,7 @@ public class MainActivity extends Activity {
         logs.setTextSize(14);
 
         logs.setPadding(
-                20,
-                20,
-                20,
-                20
+                20,20,20,20
         );
 
         logs.setBackgroundColor(
@@ -351,9 +341,7 @@ public class MainActivity extends Activity {
 
         setContentView(root);
 
-        log(
-                "SYSTEM READY"
-        );
+        log("SYSTEM READY");
     }
 
     private Button buildButton(
@@ -368,9 +356,7 @@ public class MainActivity extends Activity {
 
         b.setAllCaps(false);
 
-        b.setTextColor(
-                Color.WHITE
-        );
+        b.setTextColor(Color.WHITE);
 
         b.setBackgroundColor(
                 Color.parseColor(color)
@@ -397,10 +383,7 @@ public class MainActivity extends Activity {
                 );
 
         params.setMargins(
-                8,
-                0,
-                8,
-                0
+                8,0,8,0
         );
 
         b.setLayoutParams(params);
