@@ -4,13 +4,18 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioRecord;
 import android.media.AudioTrack;
 import android.media.MediaRecorder;
+import android.media.audiofx.AcousticEchoCanceler;
+import android.media.audiofx.NoiseSuppressor;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Vibrator;
+import android.view.Gravity;
 import android.view.MotionEvent;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -31,13 +36,19 @@ public class MainActivity extends Activity {
 
     private final int DISCOVERY_PORT = 55556;
 
-    private final String targetIp = "255.255.255.255";
+    private final String BROADCAST_IP = "255.255.255.255";
 
-    private String deviceName = Build.MODEL;
+    private final String deviceName = Build.MODEL;
 
-    private ArrayList<String> devices = new ArrayList<>();
+    private final String deviceId =
+            Build.MODEL + "_" + System.currentTimeMillis();
+
+    private final ArrayList<String> devices =
+            new ArrayList<>();
 
     private ArrayAdapter<String> adapter;
+
+    private TextView status;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -55,47 +66,43 @@ public class MainActivity extends Activity {
 
         root.setOrientation(LinearLayout.VERTICAL);
 
-        root.setPadding(40, 60, 40, 40);
+        root.setPadding(35, 55, 35, 35);
 
         root.setBackgroundColor(
                 Color.parseColor("#EAF4FB")
         );
 
-        TextView logo = new TextView(this);
+        TextView title = new TextView(this);
 
-        logo.setText("📡 WiFi Intercom DZ");
+        title.setText("📡 WiFi Intercom DZ");
 
-        logo.setTextSize(28);
+        title.setTextSize(30);
 
-        logo.setTextColor(Color.BLACK);
+        title.setTextColor(Color.BLACK);
 
-        TextView subtitle = new TextView(this);
+        title.setPadding(0,0,0,15);
 
-        subtitle.setText("اتصال محلي عبر Wi-Fi");
+        TextView info = new TextView(this);
 
-        subtitle.setTextSize(16);
+        info.setText(
+                "📱 " + deviceName
+        );
 
-        subtitle.setTextColor(Color.DKGRAY);
+        info.setTextSize(16);
 
-        TextView deviceInfo = new TextView(this);
+        info.setTextColor(Color.DKGRAY);
 
-        deviceInfo.setText("📱 " + deviceName);
+        info.setPadding(0,0,0,20);
 
-        deviceInfo.setTextSize(16);
+        TextView online = new TextView(this);
 
-        deviceInfo.setTextColor(Color.BLACK);
+        online.setText("🟢 الأجهزة المتصلة");
 
-        deviceInfo.setPadding(0, 20, 0, 20);
+        online.setTextSize(18);
 
-        TextView onlineTitle = new TextView(this);
+        online.setTextColor(Color.BLACK);
 
-        onlineTitle.setText("🟢 الأجهزة المتصلة");
-
-        onlineTitle.setTextSize(18);
-
-        onlineTitle.setTextColor(Color.BLACK);
-
-        onlineTitle.setPadding(0, 20, 0, 20);
+        online.setPadding(0,0,0,20);
 
         ListView listView = new ListView(this);
 
@@ -107,27 +114,29 @@ public class MainActivity extends Activity {
 
         listView.setAdapter(adapter);
 
-        TextView status = new TextView(this);
+        status = new TextView(this);
 
         status.setText("🟢 جاهز للتحدث");
 
         status.setTextSize(18);
 
-        status.setPadding(0, 30, 0, 40);
+        status.setGravity(Gravity.CENTER);
+
+        status.setPadding(0,20,0,20);
 
         Button ptt = new Button(this);
 
         ptt.setText("🎙️ اضغط مطولاً للتحدث");
 
-        ptt.setTextSize(22);
+        ptt.setTextSize(24);
 
         ptt.setAllCaps(false);
+
+        ptt.setTextColor(Color.WHITE);
 
         ptt.setBackgroundColor(
                 Color.parseColor("#2196F3")
         );
-
-        ptt.setTextColor(Color.WHITE);
 
         LinearLayout.LayoutParams btnParams =
                 new LinearLayout.LayoutParams(
@@ -135,19 +144,19 @@ public class MainActivity extends Activity {
                         260
                 );
 
-        root.addView(logo);
+        btnParams.setMargins(0,20,0,0);
 
-        root.addView(subtitle);
+        root.addView(title);
 
-        root.addView(deviceInfo);
+        root.addView(info);
 
-        root.addView(onlineTitle);
+        root.addView(online);
 
         root.addView(
                 listView,
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
-                        400
+                        350
                 )
         );
 
@@ -157,7 +166,7 @@ public class MainActivity extends Activity {
 
         setContentView(root);
 
-        startReceiver();
+        startVoiceReceiver();
 
         startDiscoveryReceiver();
 
@@ -168,17 +177,19 @@ public class MainActivity extends Activity {
             if (event.getAction()
                     == MotionEvent.ACTION_DOWN) {
 
+                vibrate(60);
+
                 isTalking = true;
 
-                status.setText("🔴 جاري الإرسال...");
+                status.setText("🔴 جاري الإرسال");
 
-                ptt.setText("🛑 حرر الزر لإيقاف الإرسال");
+                ptt.setText("🛑 حرر الزر");
 
                 ptt.setBackgroundColor(
                         Color.parseColor("#D32F2F")
                 );
 
-                startSender();
+                startVoiceSender();
 
                 return true;
             }
@@ -205,7 +216,17 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void startSender() {
+    private void vibrate(int ms) {
+
+        Vibrator vibrator =
+                (Vibrator) getSystemService(VIBRATOR_SERVICE);
+
+        if (vibrator != null) {
+            vibrator.vibrate(ms);
+        }
+    }
+
+    private void startVoiceSender() {
 
         if (checkSelfPermission(
                 Manifest.permission.RECORD_AUDIO)
@@ -227,12 +248,24 @@ public class MainActivity extends Activity {
 
             AudioRecord recorder =
                     new AudioRecord(
-                            MediaRecorder.AudioSource.MIC,
+                            MediaRecorder.AudioSource.VOICE_COMMUNICATION,
                             sampleRate,
                             AudioFormat.CHANNEL_IN_MONO,
                             AudioFormat.ENCODING_PCM_16BIT,
                             bufferSize
                     );
+
+            if (NoiseSuppressor.isAvailable()) {
+                NoiseSuppressor.create(
+                        recorder.getAudioSessionId()
+                );
+            }
+
+            if (AcousticEchoCanceler.isAvailable()) {
+                AcousticEchoCanceler.create(
+                        recorder.getAudioSessionId()
+                );
+            }
 
             try {
 
@@ -242,7 +275,9 @@ public class MainActivity extends Activity {
                 socket.setBroadcast(true);
 
                 InetAddress address =
-                        InetAddress.getByName(targetIp);
+                        InetAddress.getByName(
+                                BROADCAST_IP
+                        );
 
                 byte[] buffer =
                         new byte[bufferSize];
@@ -286,7 +321,7 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    private void startReceiver() {
+    private void startVoiceReceiver() {
 
         new Thread(() -> {
 
@@ -294,20 +329,57 @@ public class MainActivity extends Activity {
 
             int bufferSize = 4096;
 
-            AudioTrack player =
-                    new AudioTrack(
-                            AudioManager.STREAM_MUSIC,
-                            sampleRate,
-                            AudioFormat.CHANNEL_OUT_MONO,
-                            AudioFormat.ENCODING_PCM_16BIT,
-                            bufferSize,
-                            AudioTrack.MODE_STREAM
-                    );
+            AudioTrack player;
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+
+                player = new AudioTrack.Builder()
+                        .setAudioAttributes(
+                                new AudioAttributes.Builder()
+                                        .setUsage(
+                                                AudioAttributes.USAGE_MEDIA
+                                        )
+                                        .setContentType(
+                                                AudioAttributes.CONTENT_TYPE_SPEECH
+                                        )
+                                        .build()
+                        )
+                        .setAudioFormat(
+                                new AudioFormat.Builder()
+                                        .setEncoding(
+                                                AudioFormat.ENCODING_PCM_16BIT
+                                        )
+                                        .setSampleRate(
+                                                sampleRate
+                                        )
+                                        .setChannelMask(
+                                                AudioFormat.CHANNEL_OUT_MONO
+                                        )
+                                        .build()
+                        )
+                        .setBufferSizeInBytes(
+                                bufferSize
+                        )
+                        .build();
+
+            } else {
+
+                player = new AudioTrack(
+                        AudioManager.STREAM_MUSIC,
+                        sampleRate,
+                        AudioFormat.CHANNEL_OUT_MONO,
+                        AudioFormat.ENCODING_PCM_16BIT,
+                        bufferSize,
+                        AudioTrack.MODE_STREAM
+                );
+            }
 
             try {
 
                 DatagramSocket socket =
-                        new DatagramSocket(VOICE_PORT);
+                        new DatagramSocket(
+                                VOICE_PORT
+                        );
 
                 byte[] buffer =
                         new byte[bufferSize];
@@ -354,14 +426,20 @@ public class MainActivity extends Activity {
                 socket.setBroadcast(true);
 
                 InetAddress address =
-                        InetAddress.getByName(targetIp);
+                        InetAddress.getByName(
+                                BROADCAST_IP
+                        );
 
                 while (true) {
 
-                    String msg =
-                            "DEVICE:" + deviceName;
+                    String message =
+                            "DEVICE:"
+                                    + deviceId
+                                    + ":"
+                                    + deviceName;
 
-                    byte[] data = msg.getBytes();
+                    byte[] data =
+                            message.getBytes();
 
                     DatagramPacket packet =
                             new DatagramPacket(
@@ -417,23 +495,35 @@ public class MainActivity extends Activity {
 
                     if (msg.startsWith("DEVICE:")) {
 
-                        String name =
-                                msg.replace(
-                                        "DEVICE:",
-                                        ""
-                                );
+                        String[] parts =
+                                msg.split(":");
 
-                        if (!name.equals(deviceName)
-                                && !devices.contains(name)) {
+                        if (parts.length >= 3) {
 
-                            runOnUiThread(() -> {
+                            String incomingId =
+                                    parts[1];
 
-                                devices.add(
-                                        "🟢 " + name
-                                );
+                            String incomingName =
+                                    parts[2];
 
-                                adapter.notifyDataSetChanged();
-                            });
+                            if (!incomingId.equals(deviceId)) {
+
+                                String finalName =
+                                        "🟢 "
+                                                + incomingName;
+
+                                if (!devices.contains(finalName)) {
+
+                                    runOnUiThread(() -> {
+
+                                        devices.add(
+                                                finalName
+                                        );
+
+                                        adapter.notifyDataSetChanged();
+                                    });
+                                }
+                            }
                         }
                     }
                 }
