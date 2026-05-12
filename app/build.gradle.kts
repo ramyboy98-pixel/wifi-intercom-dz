@@ -12,13 +12,13 @@ android {
 
         applicationId = "com.idaradz.wifiintercom"
 
-        minSdk = 23
+        minSdk = 24
 
         targetSdk = 36
 
-        versionCode = 4
+        versionCode = 5
 
-        versionName = "4.0"
+        versionName = "5.0"
     }
 
     buildTypes {
@@ -31,6 +31,8 @@ android {
         release {
 
             isMinifyEnabled = false
+
+            isShrinkResources = false
         }
     }
 
@@ -42,11 +44,27 @@ android {
         targetCompatibility =
             JavaVersion.VERSION_17
     }
+
+    packaging {
+
+        resources {
+
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
 }
 
 dependencies {
 
-    implementation("androidx.core:core:1.13.1")
+    implementation(
+        "androidx.core:core:1.13.1"
+    )
 
-    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation(
+        "androidx.appcompat:appcompat:1.7.0"
+    )
+
+    implementation(
+        "com.google.android.material:material:1.12.0"
+    )
 }
