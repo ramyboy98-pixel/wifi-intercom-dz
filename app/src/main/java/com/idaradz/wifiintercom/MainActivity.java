@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioManager;
@@ -50,7 +51,11 @@ public class MainActivity extends Activity {
 
     private String selectedDeviceId = null;
 
-    private TextView statusView, channelView, targetView, deviceBox, logs;
+    private TextView statusView;
+    private TextView channelView;
+    private TextView targetView;
+    private TextView deviceBox;
+    private TextView logs;
     private EditText usernameInput;
 
     private final ConcurrentHashMap<String, DeviceState> devices = new ConcurrentHashMap<>();
@@ -83,125 +88,148 @@ public class MainActivity extends Activity {
         log("CHANNEL = " + currentChannel);
     }
 
+    private int dp(int value) {
+        return (int) (value * getResources().getDisplayMetrics().density);
+    }
+
+    private GradientDrawable bg(int color, int radius) {
+        GradientDrawable d = new GradientDrawable();
+        d.setColor(color);
+        d.setCornerRadius(dp(radius));
+        return d;
+    }
+
+    private GradientDrawable strokeBg(int color, int stroke, int strokeColor, int radius) {
+        GradientDrawable d = bg(color, radius);
+        d.setStroke(dp(stroke), strokeColor);
+        return d;
+    }
+
     private void buildUi() {
         boolean dark = settings.isDarkMode();
 
-        int bg = dark ? Color.parseColor("#101418") : Color.parseColor("#F6F8FC");
-        int card = dark ? Color.parseColor("#1B222C") : Color.WHITE;
-        int text = dark ? Color.WHITE : Color.BLACK;
-        int soft = dark ? Color.parseColor("#26313D") : Color.parseColor("#EEF3FA");
+        int pageBg = dark ? Color.parseColor("#F6F8FC") : Color.parseColor("#F6F8FC");
+        int text = Color.BLACK;
 
-        ScrollView page = new ScrollView(this);
+        ScrollView scrollPage = new ScrollView(this);
+        scrollPage.setFillViewport(true);
+        scrollPage.setBackgroundColor(pageBg);
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(24, 38, 24, 24);
-        root.setBackgroundColor(bg);
+        root.setPadding(dp(18), dp(22), dp(18), dp(18));
+        root.setBackgroundColor(pageBg);
 
-        TextView title = label("📡 WiFi Intercom PRO", 30, text, true);
-        title.setPadding(0, 0, 0, 18);
+        TextView title = text("📡 WiFi Intercom PRO", 31, text, true);
+        title.setPadding(0, 0, 0, dp(14));
 
         LinearLayout userRow = new LinearLayout(this);
         userRow.setOrientation(LinearLayout.HORIZONTAL);
         userRow.setGravity(Gravity.CENTER_VERTICAL);
+        userRow.setPadding(0, 0, 0, dp(8));
 
-        TextView avatar = label("👤", 42, text, false);
+        TextView avatar = text("👤", 42, Color.parseColor("#1976D2"), false);
+        avatar.setGravity(Gravity.CENTER);
+
         usernameInput = new EditText(this);
         usernameInput.setText(username);
         usernameInput.setTextSize(20);
         usernameInput.setSingleLine(true);
-        usernameInput.setTextColor(text);
+        usernameInput.setTextColor(Color.BLACK);
         usernameInput.setHintTextColor(Color.GRAY);
-        usernameInput.setBackgroundColor(card);
-        usernameInput.setPadding(22, 6, 22, 6);
+        usernameInput.setPadding(dp(16), 0, dp(16), 0);
+        usernameInput.setBackground(strokeBg(Color.WHITE, 1, Color.parseColor("#9E9E9E"), 28));
 
-        userRow.addView(avatar, new LinearLayout.LayoutParams(80, 90));
+        userRow.addView(avatar, new LinearLayout.LayoutParams(dp(58), dp(60)));
         userRow.addView(usernameInput, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                90
+                dp(58)
         ));
 
-        channelView = label("📻 " + currentChannel, 24, Color.parseColor("#1565C0"), false);
-        targetView = label("🎯 Target: ALL DEVICES", 20, text, false);
+        channelView = text("📻 " + currentChannel, 24, Color.parseColor("#1565C0"), false);
+        targetView = text("🎯 Target: ALL DEVICES", 21, Color.BLACK, false);
 
-        LinearLayout saveCard = card(card);
-        EditText dummy = new EditText(this);
-        dummy.setHint("Username");
-        dummy.setTextColor(text);
-        dummy.setHintTextColor(Color.GRAY);
-        dummy.setTextSize(22);
+        LinearLayout saveCard = card(Color.WHITE, 16);
+        saveCard.setPadding(dp(12), dp(12), dp(12), dp(12));
 
-        Button save = button("💾  SAVE", "#1565C0", 22);
-        save.setOnClickListener(v -> {
+        EditText saveInput = new EditText(this);
+        saveInput.setHint("Username");
+        saveInput.setTextSize(22);
+        saveInput.setSingleLine(true);
+        saveInput.setTextColor(Color.BLACK);
+        saveInput.setHintTextColor(Color.GRAY);
+        saveInput.setPadding(dp(16), 0, dp(16), 0);
+        saveInput.setBackground(strokeBg(Color.WHITE, 1, Color.parseColor("#9E9E9E"), 2));
+
+        Button saveBtn = button("💾  SAVE", "#1565C0", 21, 26);
+        saveBtn.setOnClickListener(v -> {
             String value = usernameInput.getText().toString().trim();
             if (!value.isEmpty()) {
                 username = value;
                 settings.setUsername(username);
+                saveInput.setText("");
                 log("USERNAME SAVED");
             }
         });
 
-        saveCard.addView(dummy, new LinearLayout.LayoutParams(
+        saveCard.addView(saveInput, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                95
-        ));
-        saveCard.addView(save, new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                90
+                dp(64)
         ));
 
-        LinearLayout channels = card(soft);
-        channels.setOrientation(LinearLayout.HORIZONTAL);
-        channels.addView(channelButton("GENERAL"));
-        channels.addView(channelButton("KITCHEN"));
-        channels.addView(channelButton("SECURITY"));
-        channels.addView(channelButton("STORAGE"));
+        LinearLayout.LayoutParams saveBtnParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                dp(62)
+        );
+        saveBtnParams.setMargins(0, dp(12), 0, 0);
+        saveCard.addView(saveBtn, saveBtnParams);
 
-        LinearLayout mode = card(soft);
-        mode.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout channelsCard = card(Color.parseColor("#E8EEF7"), 28);
+        channelsCard.setOrientation(LinearLayout.HORIZONTAL);
+        channelsCard.setPadding(dp(4), dp(4), dp(4), dp(4));
+        channelsCard.addView(channelButton("GENERAL"));
+        channelsCard.addView(channelButton("KITCHEN"));
+        channelsCard.addView(channelButton("SECURITY"));
+        channelsCard.addView(channelButton("STORAGE"));
 
-        Button light = button("📡  Light", dark ? "#FFFFFF" : "#1565C0", 18);
-        light.setTextColor(dark ? Color.BLACK : Color.WHITE);
+        LinearLayout modeCard = card(Color.parseColor("#263238"), 28);
+        modeCard.setOrientation(LinearLayout.HORIZONTAL);
+        modeCard.setPadding(dp(2), dp(2), dp(2), dp(2));
+
+        Button light = button("📡  Light", "#FFFFFF", 18, 28);
+        light.setTextColor(Color.BLACK);
+        Button darkBtn = button("💡  Dark", "#263238", 18, 28);
+
         light.setOnClickListener(v -> {
             settings.setDarkMode(false);
             recreate();
         });
 
-        Button darkBtn = button("💡  Dark", dark ? "#1565C0" : "#263238", 18);
         darkBtn.setOnClickListener(v -> {
             settings.setDarkMode(true);
             recreate();
         });
 
-        mode.addView(light, new LinearLayout.LayoutParams(0, 85, 1f));
-        mode.addView(darkBtn, new LinearLayout.LayoutParams(0, 85, 1f));
+        modeCard.addView(light, new LinearLayout.LayoutParams(0, dp(58), 1f));
+        modeCard.addView(darkBtn, new LinearLayout.LayoutParams(0, dp(58), 1f));
 
-        TextView onlineTitle = label("🟢 ONLINE DEVICES", 22, text, false);
+        TextView onlineTitle = text("🟢 ONLINE DEVICES", 22, Color.BLACK, false);
+        onlineTitle.setPadding(0, dp(8), 0, dp(8));
 
-        deviceBox = label("No devices online", 20, text, false);
+        LinearLayout deviceCard = card(Color.WHITE, 10);
+        deviceBox = text("No devices online", 19, Color.BLACK, false);
         deviceBox.setTypeface(Typeface.MONOSPACE);
-        deviceBox.setPadding(22, 18, 22, 18);
-
-        LinearLayout deviceCard = card(card);
+        deviceBox.setPadding(dp(16), dp(14), dp(16), dp(14));
         deviceCard.addView(deviceBox, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                210
+                dp(150)
         ));
 
-        deviceCard.setOnClickListener(v -> {
-            selectedDeviceId = null;
-            targetView.setText("🎯 Target: ALL DEVICES");
-            log("TARGET = ALL");
-        });
-
-        statusView = label("🟢 READY", 30, Color.BLACK, false);
+        statusView = text("🟢  READY", 30, Color.BLACK, false);
         statusView.setGravity(Gravity.CENTER);
-        statusView.setBackgroundColor(Color.parseColor("#E8F8EA"));
-        statusView.setPadding(0, 26, 0, 26);
+        statusView.setBackground(strokeBg(Color.parseColor("#E8F8EA"), 1, Color.parseColor("#4CAF50"), 12));
 
-        Button ptt = button("🎙  HOLD TO TALK", "#C91414", 30);
-        ptt.setPadding(0, 35, 0, 35);
-
+        Button ptt = button("🎙  HOLD TO TALK", "#C91414", 30, 10);
         ptt.setOnTouchListener((v, event) -> {
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
                 startTalking();
@@ -217,84 +245,100 @@ public class MainActivity extends Activity {
             return true;
         });
 
-        logs = label("", 16, text, false);
+        logs = text("", 16, Color.BLACK, false);
         logs.setTypeface(Typeface.MONOSPACE);
-        logs.setPadding(20, 20, 20, 20);
-        logs.setBackgroundColor(soft);
+        logs.setPadding(dp(14), dp(14), dp(14), dp(14));
+        logs.setBackground(bg(Color.parseColor("#EEF3FA"), 10));
 
-        root.addView(title);
-        root.addView(userRow);
-        root.addView(channelView);
-        root.addView(targetView);
-        root.addView(saveCard);
-        root.addView(channels);
-        root.addView(mode);
-        root.addView(onlineTitle);
-        root.addView(deviceCard);
-        root.addView(statusView, new LinearLayout.LayoutParams(
+        add(root, title);
+        add(root, userRow);
+        add(root, channelView);
+        add(root, targetView);
+        add(root, saveCard);
+        add(root, channelsCard);
+        add(root, modeCard);
+        add(root, onlineTitle);
+        add(root, deviceCard);
+
+        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                120
-        ));
-        root.addView(ptt, new LinearLayout.LayoutParams(
+                dp(88)
+        );
+        statusParams.setMargins(0, dp(12), 0, dp(12));
+        root.addView(statusView, statusParams);
+
+        LinearLayout.LayoutParams pttParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                170
-        ));
+                dp(116)
+        );
+        pttParams.setMargins(0, dp(8), 0, dp(16));
+        root.addView(ptt, pttParams);
+
         root.addView(logs, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                330
+                dp(210)
         ));
 
-        page.addView(root);
-        setContentView(page);
+        scrollPage.addView(root);
+        setContentView(scrollPage);
     }
 
-    private LinearLayout card(int color) {
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setPadding(14, 14, 14, 14);
-        box.setBackgroundColor(color);
-
+    private void add(LinearLayout root, android.view.View view) {
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
         );
-        p.setMargins(0, 12, 0, 12);
-        box.setLayoutParams(p);
+        p.setMargins(0, 0, 0, dp(10));
+        root.addView(view, p);
+    }
 
+    private LinearLayout card(int color, int radius) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setBackground(bg(color, radius));
         return box;
     }
 
-    private TextView label(String text, int size, int color, boolean bold) {
+    private TextView text(String value, int size, int color, boolean bold) {
         TextView t = new TextView(this);
-        t.setText(text);
+        t.setText(value);
         t.setTextSize(size);
         t.setTextColor(color);
         if (bold) t.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         return t;
     }
 
-    private Button button(String text, String color, int size) {
+    private Button button(String value, String color, int size, int radius) {
         Button b = new Button(this);
-        b.setText(text);
+        b.setText(value);
         b.setTextSize(size);
         b.setAllCaps(false);
         b.setTextColor(Color.WHITE);
-        b.setBackgroundColor(Color.parseColor(color));
+        b.setBackground(bg(Color.parseColor(color), radius));
         return b;
     }
 
     private Button channelButton(String channel) {
-        Button b = button(channel, "#DCE4F1", 15);
-        b.setTextColor(Color.BLACK);
+        boolean active = channel.equals(currentChannel);
 
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, 80, 1f);
-        p.setMargins(4, 0, 4, 0);
+        Button b = button(
+                channel,
+                active ? "#405A8A" : "#E8EEF7",
+                14,
+                24
+        );
+
+        b.setTextColor(active ? Color.WHITE : Color.BLACK);
+
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, dp(52), 1f);
+        p.setMargins(dp(3), 0, dp(3), 0);
         b.setLayoutParams(p);
 
         b.setOnClickListener(v -> {
             currentChannel = channel;
             settings.setChannel(channel);
             channelView.setText("📻 " + currentChannel);
+            buildUi();
             log("CHANNEL = " + currentChannel);
         });
 
@@ -314,8 +358,8 @@ public class MainActivity extends Activity {
         beepStart();
         vibrate();
 
-        statusView.setText("🔴 TALKING");
-        statusView.setBackgroundColor(Color.parseColor("#FFE1E1"));
+        statusView.setText("🔴  TALKING");
+        statusView.setBackground(strokeBg(Color.parseColor("#FFE1E1"), 1, Color.RED, 12));
 
         recorder = AudioEngine.createRecorder();
 
@@ -356,8 +400,8 @@ public class MainActivity extends Activity {
             }
         } catch (Exception ignored) {}
 
-        statusView.setText("🟢 READY");
-        statusView.setBackgroundColor(Color.parseColor("#E8F8EA"));
+        statusView.setText("🟢  READY");
+        statusView.setBackground(strokeBg(Color.parseColor("#E8F8EA"), 1, Color.parseColor("#4CAF50"), 12));
 
         log("TX STOP");
     }
@@ -367,8 +411,7 @@ public class MainActivity extends Activity {
             try {
                 byte[] encrypted = EncryptionManager.encrypt(rawAudio);
 
-                String header =
-                        "AUD|" + currentChannel + "|" + deviceId + "|" + username + "|";
+                String header = "AUD|" + currentChannel + "|" + deviceId + "|" + username + "|";
 
                 byte[] h = header.getBytes(StandardCharsets.UTF_8);
                 byte[] packetData = new byte[h.length + encrypted.length];
@@ -425,7 +468,10 @@ public class MainActivity extends Activity {
                         .setBufferSizeInBytes(bufferSize)
                         .build();
 
-                DatagramSocket socket = new DatagramSocket(AUDIO_PORT);
+                DatagramSocket socket = new DatagramSocket(null);
+                socket.setReuseAddress(true);
+                socket.bind(new java.net.InetSocketAddress(AUDIO_PORT));
+
                 byte[] buffer = new byte[32768];
 
                 player.play();
@@ -476,8 +522,8 @@ public class MainActivity extends Activity {
             }
 
             runOnUiThread(() -> {
-                statusView.setText("🔊 RECEIVING: " + senderName);
-                statusView.setBackgroundColor(Color.parseColor("#FFF8D6"));
+                statusView.setText("🔊  RECEIVING: " + senderName);
+                statusView.setBackground(strokeBg(Color.parseColor("#FFF8D6"), 1, Color.parseColor("#FBC02D"), 12));
             });
 
         } catch (Exception ignored) {}
@@ -532,7 +578,10 @@ public class MainActivity extends Activity {
     private void startDiscoveryReceiver() {
         new Thread(() -> {
             try {
-                DatagramSocket socket = new DatagramSocket(DISCOVERY_PORT);
+                DatagramSocket socket = new DatagramSocket(null);
+                socket.setReuseAddress(true);
+                socket.bind(new java.net.InetSocketAddress(DISCOVERY_PORT));
+
                 byte[] buffer = new byte[2048];
 
                 while (running) {
@@ -626,16 +675,15 @@ public class MainActivity extends Activity {
             deviceBox.setText(builder.toString());
 
             if (!isTalking) {
-                statusView.setText("🟢 READY");
-                statusView.setBackgroundColor(Color.parseColor("#E8F8EA"));
+                statusView.setText("🟢  READY");
+                statusView.setBackground(strokeBg(Color.parseColor("#E8F8EA"), 1, Color.parseColor("#4CAF50"), 12));
             }
         });
     }
 
     private void enableLocks() {
         try {
-            WifiManager wifi =
-                    (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
+            WifiManager wifi = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
 
             multicastLock = wifi.createMulticastLock("wifi_intercom_multicast");
             multicastLock.setReferenceCounted(true);
