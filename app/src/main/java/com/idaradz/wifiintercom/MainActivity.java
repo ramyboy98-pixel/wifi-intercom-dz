@@ -2,7 +2,6 @@ package com.idaradz.wifiintercom;
 
 import android.Manifest;
 import android.app.Activity;
-import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.content.Context;
@@ -10,22 +9,22 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.media.AudioAttributes;
 import android.media.AudioFormat;
-import android.media.AudioManager;
 import android.media.AudioRecord;
 import android.media.AudioTrack;
 import android.media.MediaRecorder;
 import android.media.audiofx.AcousticEchoCanceler;
+import android.media.audiofx.AutomaticGainControl;
 import android.media.audiofx.NoiseSuppressor;
+import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.PowerManager;
+import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.view.Gravity;
 import android.view.MotionEvent;
-import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.LinearLayout;
-import android.widget.ListView;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
@@ -35,39 +34,42 @@ import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
 import java.util.Date;
 import java.util.Locale;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class MainActivity extends Activity {
 
+    private static final int AUDIO_PORT = 55555;
+
+    private static final int DISCOVERY_PORT = 55556;
+
+    private static final String BROADCAST_IP =
+            "255.255.255.255";
+
+    private static final int SAMPLE_RATE = 16000;
+
     private volatile boolean isTalking = false;
-
-    private final int VOICE_PORT = 55555;
-
-    private final int DISCOVERY_PORT = 55556;
-
-    private final String BROADCAST_IP = "255.255.255.255";
 
     private String currentChannel = "GENERAL";
 
-    private final String deviceName = Build.MODEL;
+    private final String deviceName =
+            Build.MODEL;
 
     private final String deviceId =
-            Build.MODEL + "_" + System.currentTimeMillis();
-
-    private final ArrayList<String> devices =
-            new ArrayList<>();
-
-    private ArrayAdapter<String> adapter;
-
-    private TextView status;
+            Build.MODEL + "_"
+                    + System.currentTimeMillis();
 
     private TextView logs;
 
-    private TextView channelText;
+    private TextView status;
 
-    private PowerManager.WakeLock wakeLock;
+    private TextView onlineDevices;
+
+    private TextView currentChannelView;
+
+    private final ConcurrentHashMap<String,String>
+            devices = new ConcurrentHashMap<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -81,13 +83,16 @@ public class MainActivity extends Activity {
                 10
         );
 
-        keepCpuAlive();
+        enablePerformanceMode();
 
         createNotification();
 
-        LinearLayout root = new LinearLayout(this);
+        LinearLayout root =
+                new LinearLayout(this);
 
-        root.setOrientation(LinearLayout.VERTICAL);
+        root.setOrientation(
+                LinearLayout.VERTICAL
+        );
 
         root.setPadding(25,45,25,25);
 
@@ -97,33 +102,52 @@ public class MainActivity extends Activity {
 
         TextView title = new TextView(this);
 
-        title.setText("📡 WiFi Intercom DZ");
+        title.setText(
+                "📡 WiFi Intercom PRO"
+        );
 
         title.setTextSize(30);
 
         title.setTextColor(Color.BLACK);
 
-        channelText = new TextView(this);
+        currentChannelView =
+                new TextView(this);
 
-        channelText.setText(
-                "📻 القناة الحالية: " + currentChannel
+        currentChannelView.setText(
+                "📻 " + currentChannel
         );
 
-        channelText.setTextSize(17);
+        currentChannelView.setTextSize(18);
 
-        channelText.setTextColor(
+        currentChannelView.setTextColor(
                 Color.parseColor("#1565C0")
         );
 
-        channelText.setPadding(0,10,0,15);
+        currentChannelView.setPadding(
+                0,10,0,15
+        );
 
-        TextView info = new TextView(this);
+        TextView device =
+                new TextView(this);
 
-        info.setText("📱 " + deviceName);
+        device.setText(
+                "📱 " + deviceName
+        );
 
-        info.setTextSize(16);
+        device.setTextSize(16);
 
-        info.setTextColor(Color.DKGRAY);
+        onlineDevices =
+                new TextView(this);
+
+        onlineDevices.setText(
+                "🟢 لا توجد أجهزة"
+        );
+
+        onlineDevices.setTextSize(15);
+
+        onlineDevices.setPadding(
+                0,15,0,15
+        );
 
         LinearLayout channels =
                 new LinearLayout(this);
@@ -132,203 +156,157 @@ public class MainActivity extends Activity {
                 LinearLayout.HORIZONTAL
         );
 
-        Button generalBtn = new Button(this);
-
-        generalBtn.setText("GENERAL");
-
-        Button kitchenBtn = new Button(this);
-
-        kitchenBtn.setText("KITCHEN");
-
-        Button securityBtn = new Button(this);
-
-        securityBtn.setText("SECURITY");
-
-        Button storageBtn = new Button(this);
-
-        storageBtn.setText("STORAGE");
-
-        channels.addView(generalBtn);
-
-        channels.addView(kitchenBtn);
-
-        channels.addView(securityBtn);
-
-        channels.addView(storageBtn);
-
-        TextView online = new TextView(this);
-
-        online.setText("🟢 الأجهزة المتصلة");
-
-        online.setTextSize(18);
-
-        online.setPadding(0,20,0,10);
-
-        ListView listView = new ListView(this);
-
-        adapter = new ArrayAdapter<>(
-                this,
-                android.R.layout.simple_list_item_1,
-                devices
+        Button g = buildChannelButton(
+                "GENERAL"
         );
 
-        listView.setAdapter(adapter);
+        Button k = buildChannelButton(
+                "KITCHEN"
+        );
+
+        Button s = buildChannelButton(
+                "SECURITY"
+        );
+
+        Button st = buildChannelButton(
+                "STORAGE"
+        );
+
+        channels.addView(g);
+
+        channels.addView(k);
+
+        channels.addView(s);
+
+        channels.addView(st);
 
         status = new TextView(this);
 
-        status.setText("🟢 جاهز للتحدث");
+        status.setText(
+                "🟢 READY"
+        );
 
         status.setGravity(Gravity.CENTER);
 
         status.setTextSize(18);
 
-        status.setPadding(0,20,0,20);
+        status.setPadding(
+                0,20,0,20
+        );
 
-        Button ptt = new Button(this);
+        Button ptt =
+                new Button(this);
 
-        ptt.setText("🎙️ اضغط مطولاً للتحدث");
+        ptt.setText(
+                "🎙 HOLD TO TALK"
+        );
 
         ptt.setTextSize(24);
 
-        ptt.setAllCaps(false);
-
         ptt.setTextColor(Color.WHITE);
 
+        ptt.setAllCaps(false);
+
         ptt.setBackgroundColor(
-                Color.parseColor("#2196F3")
+                Color.parseColor("#1E88E5")
         );
 
-        LinearLayout.LayoutParams btnParams =
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        220
-                );
-
-        btnParams.setMargins(0,15,0,20);
-
-        TextView logsTitle = new TextView(this);
-
-        logsTitle.setText("📜 سجل النشاط");
-
-        logsTitle.setTextSize(18);
-
-        ScrollView scrollView = new ScrollView(this);
+        ScrollView scroll =
+                new ScrollView(this);
 
         logs = new TextView(this);
 
-        logs.setTextColor(Color.DKGRAY);
-
         logs.setTextSize(14);
 
-        logs.setPadding(15,15,15,15);
-
-        logs.setBackgroundColor(
-                Color.parseColor("#DCEAF7")
+        logs.setPadding(
+                20,20,20,20
         );
 
-        scrollView.addView(logs);
+        logs.setBackgroundColor(
+                Color.parseColor("#DDEAF5")
+        );
+
+        scroll.addView(logs);
 
         root.addView(title);
 
-        root.addView(channelText);
+        root.addView(currentChannelView);
 
-        root.addView(info);
+        root.addView(device);
 
         root.addView(channels);
 
-        root.addView(online);
-
-        root.addView(
-                listView,
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        250
-                )
-        );
+        root.addView(onlineDevices);
 
         root.addView(status);
 
-        root.addView(ptt, btnParams);
-
-        root.addView(logsTitle);
-
         root.addView(
-                scrollView,
+                ptt,
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
-                        320
+                        230
+                )
+        );
+
+        root.addView(
+                scroll,
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        500
                 )
         );
 
         setContentView(root);
 
-        log("تم تشغيل النظام");
-
-        generalBtn.setOnClickListener(
-                v -> switchChannel("GENERAL")
-        );
-
-        kitchenBtn.setOnClickListener(
-                v -> switchChannel("KITCHEN")
-        );
-
-        securityBtn.setOnClickListener(
-                v -> switchChannel("SECURITY")
-        );
-
-        storageBtn.setOnClickListener(
-                v -> switchChannel("STORAGE")
-        );
-
-        startVoiceReceiver();
+        log("SYSTEM ONLINE");
 
         startDiscoveryReceiver();
 
         startDiscoverySender();
 
-        ptt.setOnTouchListener((v, event) -> {
+        startVoiceReceiver();
 
-            if (event.getAction()
-                    == MotionEvent.ACTION_DOWN) {
+        ptt.setOnTouchListener((v,event)->{
 
-                vibrate(50);
+            if(event.getAction()
+                    == MotionEvent.ACTION_DOWN){
+
+                vibrate();
 
                 isTalking = true;
 
-                status.setText("🔴 جاري الإرسال");
-
-                ptt.setText("🛑 حرر الزر");
+                status.setText(
+                        "🔴 TRANSMITTING"
+                );
 
                 ptt.setBackgroundColor(
                         Color.parseColor("#D32F2F")
                 );
 
-                log("بدأ الإرسال على قناة "
-                        + currentChannel);
-
                 startVoiceSender();
+
+                log(
+                        "TX START "
+                                + currentChannel
+                );
 
                 return true;
             }
 
-            if (event.getAction()
-                    == MotionEvent.ACTION_UP
-                    || event.getAction()
-                    == MotionEvent.ACTION_CANCEL) {
+            if(event.getAction()
+                    == MotionEvent.ACTION_UP){
 
                 isTalking = false;
 
-                status.setText("🟢 جاهز للتحدث");
-
-                ptt.setText(
-                        "🎙️ اضغط مطولاً للتحدث"
+                status.setText(
+                        "🟢 READY"
                 );
 
                 ptt.setBackgroundColor(
-                        Color.parseColor("#2196F3")
+                        Color.parseColor("#1E88E5")
                 );
 
-                log("تم إيقاف الإرسال");
+                log("TX STOP");
 
                 return true;
             }
@@ -337,25 +315,65 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void keepCpuAlive() {
+    private Button buildChannelButton(
+            String channel){
 
-        PowerManager powerManager =
-                (PowerManager) getSystemService(
-                        Context.POWER_SERVICE
+        Button b = new Button(this);
+
+        b.setText(channel);
+
+        b.setOnClickListener(v -> {
+
+            currentChannel = channel;
+
+            currentChannelView.setText(
+                    "📻 " + currentChannel
+            );
+
+            log(
+                    "CHANNEL "
+                            + channel
+            );
+        });
+
+        return b;
+    }
+
+    private void enablePerformanceMode(){
+
+        WifiManager wifi =
+                (WifiManager)
+                        getApplicationContext()
+                                .getSystemService(
+                                        WIFI_SERVICE
+                                );
+
+        WifiManager.MulticastLock lock =
+                wifi.createMulticastLock(
+                        "wifiintercom"
                 );
 
-        wakeLock =
-                powerManager.newWakeLock(
+        lock.acquire();
+
+        PowerManager pm =
+                (PowerManager)
+                        getSystemService(
+                                POWER_SERVICE
+                        );
+
+        PowerManager.WakeLock wakeLock =
+                pm.newWakeLock(
                         PowerManager.PARTIAL_WAKE_LOCK,
-                        "wifiintercom:wakelock"
+                        "wifi:wakelock"
                 );
 
         wakeLock.acquire();
     }
 
-    private void createNotification() {
+    private void createNotification(){
 
-        String channelId = "wifi_intercom";
+        String channelId =
+                "wifi_intercom";
 
         NotificationManager manager =
                 (NotificationManager)
@@ -363,8 +381,8 @@ public class MainActivity extends Activity {
                                 NOTIFICATION_SERVICE
                         );
 
-        if (Build.VERSION.SDK_INT
-                >= Build.VERSION_CODES.O) {
+        if(Build.VERSION.SDK_INT
+                >= Build.VERSION_CODES.O){
 
             NotificationChannel channel =
                     new NotificationChannel(
@@ -378,84 +396,44 @@ public class MainActivity extends Activity {
             );
         }
 
-        Notification notification =
+        NotificationCompat.Builder builder =
                 new NotificationCompat.Builder(
                         this,
                         channelId
-                )
-                        .setContentTitle(
-                                "WiFi Intercom DZ"
-                        )
-                        .setContentText(
-                                "📡 التطبيق يعمل"
-                        )
-                        .setSmallIcon(
-                                android.R.drawable.presence_audio_online
-                        )
-                        .build();
-
-        manager.notify(1, notification);
-    }
-
-    private void switchChannel(String channel) {
-
-        currentChannel = channel;
-
-        channelText.setText(
-                "📻 القناة الحالية: "
-                        + currentChannel
-        );
-
-        log("تم التبديل إلى "
-                + channel);
-    }
-
-    private void log(String text) {
-
-        runOnUiThread(() -> {
-
-            String time =
-                    new SimpleDateFormat(
-                            "HH:mm:ss",
-                            Locale.getDefault()
-                    ).format(new Date());
-
-            logs.append(
-                    "[" + time + "] "
-                            + text + "\n"
-            );
-        });
-    }
-
-    private void vibrate(int ms) {
-
-        Vibrator vibrator =
-                (Vibrator) getSystemService(
-                        VIBRATOR_SERVICE
                 );
 
-        if (vibrator != null) {
+        builder.setContentTitle(
+                "WiFi Intercom PRO"
+        );
 
-            vibrator.vibrate(ms);
-        }
+        builder.setContentText(
+                "📡 ACTIVE"
+        );
+
+        builder.setSmallIcon(
+                android.R.drawable.presence_audio_online
+        );
+
+        manager.notify(
+                1,
+                builder.build()
+        );
     }
 
-    private void startVoiceSender() {
+    private void startVoiceSender(){
 
-        if (checkSelfPermission(
+        if(checkSelfPermission(
                 Manifest.permission.RECORD_AUDIO)
-                != PackageManager.PERMISSION_GRANTED) {
+                != PackageManager.PERMISSION_GRANTED){
 
             return;
         }
 
         new Thread(() -> {
 
-            int sampleRate = 16000;
-
             int bufferSize =
                     AudioRecord.getMinBufferSize(
-                            sampleRate,
+                            SAMPLE_RATE,
                             AudioFormat.CHANNEL_IN_MONO,
                             AudioFormat.ENCODING_PCM_16BIT
                     );
@@ -463,27 +441,34 @@ public class MainActivity extends Activity {
             AudioRecord recorder =
                     new AudioRecord(
                             MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-                            sampleRate,
+                            SAMPLE_RATE,
                             AudioFormat.CHANNEL_IN_MONO,
                             AudioFormat.ENCODING_PCM_16BIT,
                             bufferSize
                     );
 
-            if (NoiseSuppressor.isAvailable()) {
+            if(NoiseSuppressor.isAvailable()){
 
                 NoiseSuppressor.create(
                         recorder.getAudioSessionId()
                 );
             }
 
-            if (AcousticEchoCanceler.isAvailable()) {
+            if(AcousticEchoCanceler.isAvailable()){
 
                 AcousticEchoCanceler.create(
                         recorder.getAudioSessionId()
                 );
             }
 
-            try {
+            if(AutomaticGainControl.isAvailable()){
+
+                AutomaticGainControl.create(
+                        recorder.getAudioSessionId()
+                );
+            }
+
+            try{
 
                 DatagramSocket socket =
                         new DatagramSocket();
@@ -500,7 +485,7 @@ public class MainActivity extends Activity {
 
                 recorder.startRecording();
 
-                while (isTalking) {
+                while(isTalking){
 
                     int read =
                             recorder.read(
@@ -509,7 +494,7 @@ public class MainActivity extends Activity {
                                     buffer.length
                             );
 
-                    if (read > 0) {
+                    if(read > 0){
 
                         String header =
                                 currentChannel
@@ -517,27 +502,25 @@ public class MainActivity extends Activity {
                                         + deviceId
                                         + "|";
 
-                        byte[] headerBytes =
+                        byte[] h =
                                 header.getBytes();
 
                         byte[] finalData =
-                                new byte[
-                                        headerBytes.length + read
-                                ];
+                                new byte[h.length + read];
 
                         System.arraycopy(
-                                headerBytes,
+                                h,
                                 0,
                                 finalData,
                                 0,
-                                headerBytes.length
+                                h.length
                         );
 
                         System.arraycopy(
                                 buffer,
                                 0,
                                 finalData,
-                                headerBytes.length,
+                                h.length,
                                 read
                         );
 
@@ -546,7 +529,7 @@ public class MainActivity extends Activity {
                                         finalData,
                                         finalData.length,
                                         address,
-                                        VOICE_PORT
+                                        AUDIO_PORT
                                 );
 
                         socket.send(packet);
@@ -559,28 +542,23 @@ public class MainActivity extends Activity {
 
                 socket.close();
 
-            } catch (Exception e) {
+            }catch (Exception e){
 
-                log("خطأ في الإرسال");
+                log("TX ERROR");
             }
 
         }).start();
     }
 
-    private void startVoiceReceiver() {
+    private void startVoiceReceiver(){
 
         new Thread(() -> {
 
-            int sampleRate = 16000;
+            try{
 
-            int bufferSize = 8192;
+                int bufferSize = 8192;
 
-            AudioTrack player;
-
-            if (Build.VERSION.SDK_INT
-                    >= Build.VERSION_CODES.LOLLIPOP) {
-
-                player =
+                AudioTrack player =
                         new AudioTrack.Builder()
                                 .setAudioAttributes(
                                         new AudioAttributes.Builder()
@@ -598,7 +576,7 @@ public class MainActivity extends Activity {
                                                         AudioFormat.ENCODING_PCM_16BIT
                                                 )
                                                 .setSampleRate(
-                                                        sampleRate
+                                                        SAMPLE_RATE
                                                 )
                                                 .setChannelMask(
                                                         AudioFormat.CHANNEL_OUT_MONO
@@ -610,23 +588,9 @@ public class MainActivity extends Activity {
                                 )
                                 .build();
 
-            } else {
-
-                player = new AudioTrack(
-                        AudioManager.STREAM_MUSIC,
-                        sampleRate,
-                        AudioFormat.CHANNEL_OUT_MONO,
-                        AudioFormat.ENCODING_PCM_16BIT,
-                        bufferSize,
-                        AudioTrack.MODE_STREAM
-                );
-            }
-
-            try {
-
                 DatagramSocket socket =
                         new DatagramSocket(
-                                VOICE_PORT
+                                AUDIO_PORT
                         );
 
                 byte[] buffer =
@@ -634,9 +598,7 @@ public class MainActivity extends Activity {
 
                 player.play();
 
-                log("نظام استقبال الصوت يعمل");
-
-                while (true) {
+                while(true){
 
                     DatagramPacket packet =
                             new DatagramPacket(
@@ -646,42 +608,37 @@ public class MainActivity extends Activity {
 
                     socket.receive(packet);
 
-                    String packetText =
+                    String text =
                             new String(
                                     packet.getData(),
                                     0,
                                     packet.getLength()
                             );
 
-                    int first =
-                            packetText.indexOf("|");
+                    int a = text.indexOf("|");
 
-                    int second =
-                            packetText.indexOf(
-                                    "|",
-                                    first + 1
-                            );
+                    int b = text.indexOf(
+                            "|",
+                            a + 1
+                    );
 
-                    if (first > 0 && second > 0) {
+                    if(a > 0 && b > 0){
 
                         String channel =
-                                packetText.substring(
-                                        0,
-                                        first
+                                text.substring(0,a);
+
+                        String sender =
+                                text.substring(
+                                        a + 1,
+                                        b
                                 );
 
-                        String senderId =
-                                packetText.substring(
-                                        first + 1,
-                                        second
-                                );
-
-                        if (!senderId.equals(deviceId)
+                        if(!sender.equals(deviceId)
                                 && channel.equals(currentChannel)
-                                && !isTalking) {
+                                && !isTalking){
 
                             int audioStart =
-                                    second + 1;
+                                    b + 1;
 
                             int audioLength =
                                     packet.getLength()
@@ -696,19 +653,19 @@ public class MainActivity extends Activity {
                     }
                 }
 
-            } catch (Exception e) {
+            }catch (Exception e){
 
-                log("خطأ مستقبل الصوت");
+                log("RX ERROR");
             }
 
         }).start();
     }
 
-    private void startDiscoverySender() {
+    private void startDiscoverySender(){
 
         new Thread(() -> {
 
-            try {
+            try{
 
                 DatagramSocket socket =
                         new DatagramSocket();
@@ -720,7 +677,7 @@ public class MainActivity extends Activity {
                                 BROADCAST_IP
                         );
 
-                while (true) {
+                while(true){
 
                     String message =
                             "DEVICE:"
@@ -743,22 +700,22 @@ public class MainActivity extends Activity {
 
                     socket.send(packet);
 
-                    Thread.sleep(3000);
+                    Thread.sleep(2000);
                 }
 
-            } catch (Exception e) {
+            }catch (Exception e){
 
-                log("خطأ اكتشاف الأجهزة");
+                log("DISCOVERY TX ERROR");
             }
 
         }).start();
     }
 
-    private void startDiscoveryReceiver() {
+    private void startDiscoveryReceiver(){
 
         new Thread(() -> {
 
-            try {
+            try{
 
                 DatagramSocket socket =
                         new DatagramSocket(
@@ -768,7 +725,7 @@ public class MainActivity extends Activity {
                 byte[] buffer =
                         new byte[1024];
 
-                while (true) {
+                while(true){
 
                     DatagramPacket packet =
                             new DatagramPacket(
@@ -785,57 +742,116 @@ public class MainActivity extends Activity {
                                     packet.getLength()
                             );
 
-                    if (msg.startsWith("DEVICE:")) {
+                    if(msg.startsWith("DEVICE:")){
 
-                        String[] parts =
+                        String[] p =
                                 msg.split(":");
 
-                        if (parts.length >= 4) {
+                        if(p.length >= 4){
 
-                            String incomingId =
-                                    parts[1];
+                            String id = p[1];
 
-                            String incomingName =
-                                    parts[2];
+                            String name = p[2];
 
-                            String incomingChannel =
-                                    parts[3];
+                            String channel = p[3];
 
-                            if (!incomingId.equals(deviceId)) {
+                            if(!id.equals(deviceId)){
 
-                                String finalName =
-                                        "🟢 "
-                                                + incomingName
+                                devices.put(
+                                        id,
+                                        name
                                                 + " ["
-                                                + incomingChannel
-                                                + "]";
+                                                + channel
+                                                + "]"
+                                );
 
-                                if (!devices.contains(finalName)) {
-
-                                    runOnUiThread(() -> {
-
-                                        devices.add(
-                                                finalName
-                                        );
-
-                                        adapter.notifyDataSetChanged();
-                                    });
-
-                                    log(
-                                            "تم اكتشاف "
-                                                    + incomingName
-                                    );
-                                }
+                                updateOnlineDevices();
                             }
                         }
                     }
                 }
 
-            } catch (Exception e) {
+            }catch (Exception e){
 
-                log("خطأ مستقبل الأجهزة");
+                log("DISCOVERY RX ERROR");
             }
 
         }).start();
+    }
+
+    private void updateOnlineDevices(){
+
+        runOnUiThread(() -> {
+
+            if(devices.isEmpty()){
+
+                onlineDevices.setText(
+                        "🟢 لا توجد أجهزة"
+                );
+
+                return;
+            }
+
+            StringBuilder builder =
+                    new StringBuilder();
+
+            for(String d : devices.values()){
+
+                builder.append("🟢 ")
+                        .append(d)
+                        .append("\n");
+            }
+
+            onlineDevices.setText(
+                    builder.toString()
+            );
+        });
+    }
+
+    private void vibrate(){
+
+        Vibrator vibrator =
+                (Vibrator)
+                        getSystemService(
+                                VIBRATOR_SERVICE
+                        );
+
+        if(vibrator == null){
+
+            return;
+        }
+
+        if(Build.VERSION.SDK_INT
+                >= Build.VERSION_CODES.O){
+
+            vibrator.vibrate(
+                    VibrationEffect.createOneShot(
+                            60,
+                            VibrationEffect.DEFAULT_AMPLITUDE
+                    )
+            );
+
+        }else{
+
+            vibrator.vibrate(60);
+        }
+    }
+
+    private void log(String text){
+
+        runOnUiThread(() -> {
+
+            String time =
+                    new SimpleDateFormat(
+                            "HH:mm:ss",
+                            Locale.getDefault()
+                    ).format(new Date());
+
+            logs.append(
+                    "[" + time + "] "
+                            + text
+                            + "\n"
+            );
+        });
     }
 }
