@@ -59,11 +59,9 @@ public class MainActivity extends Activity {
     private TextView selectedView;
     private TextView logs;
 
-    private ListView deviceList;
     private ArrayAdapter<String> adapter;
     private final ArrayList<String> deviceRows = new ArrayList<>();
     private final ArrayList<String> deviceIds = new ArrayList<>();
-
     private final ConcurrentHashMap<String, DeviceState> devices = new ConcurrentHashMap<>();
 
     private WifiManager.MulticastLock multicastLock;
@@ -76,10 +74,7 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        requestPermissions(
-                new String[]{Manifest.permission.RECORD_AUDIO},
-                1
-        );
+        requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 1);
 
         settings = new SettingsManager(this);
         username = settings.getUsername();
@@ -182,14 +177,23 @@ public class MainActivity extends Activity {
         onlineTitle.setTextSize(16);
         onlineTitle.setPadding(0, 12, 0, 6);
 
-        deviceList = new ListView(this);
+        ListView deviceList = new ListView(this);
         adapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, deviceRows);
         deviceList.setAdapter(adapter);
 
         deviceList.setOnItemClickListener((parent, view, position, id) -> {
             if (position >= 0 && position < deviceIds.size()) {
-                selectedDeviceId = deviceIds.get(position);
+                String chosenId = deviceIds.get(position);
+
+                if (chosenId == null || chosenId.isEmpty()) {
+                    selectedDeviceId = null;
+                    selectedView.setText("🎯 Target: ALL DEVICES");
+                    return;
+                }
+
+                selectedDeviceId = chosenId;
                 DeviceState d = devices.get(selectedDeviceId);
+
                 if (d != null) {
                     selectedView.setText("🎯 Target: " + d.name + " / " + d.ip);
                     log("TARGET = " + d.name);
@@ -208,7 +212,6 @@ public class MainActivity extends Activity {
         ptt.setTextSize(24);
 
         ptt.setOnTouchListener((v, event) -> {
-
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
                 startTalking();
                 return true;
@@ -240,15 +243,19 @@ public class MainActivity extends Activity {
         root.addView(channels);
         root.addView(actions);
         root.addView(onlineTitle);
+
         root.addView(deviceList, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 260
         ));
+
         root.addView(statusView);
+
         root.addView(ptt, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 230
         ));
+
         root.addView(scroll, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 430
@@ -352,7 +359,7 @@ public class MainActivity extends Activity {
 
         new Thread(() -> {
             try {
-                byte[] encrypted = CryptoManager.encrypt(rawAudio);
+                byte[] encrypted = EncryptionManager.encrypt(rawAudio);
 
                 String header =
                         "AUD|" +
@@ -424,9 +431,10 @@ public class MainActivity extends Activity {
                 while (running) {
                     DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
                     socket.receive(packet);
-
                     parseAudioPacket(packet);
                 }
+
+                socket.close();
 
             } catch (Exception e) {
                 log("RX ERROR");
@@ -458,7 +466,7 @@ public class MainActivity extends Activity {
             byte[] encrypted = new byte[data.length - audioStart];
             System.arraycopy(data, audioStart, encrypted, 0, encrypted.length);
 
-            byte[] audio = CryptoManager.decrypt(encrypted);
+            byte[] audio = EncryptionManager.decrypt(encrypted);
 
             player.write(audio, 0, audio.length);
 
@@ -520,6 +528,8 @@ public class MainActivity extends Activity {
                     Thread.sleep(1500);
                 }
 
+                socket.close();
+
             } catch (Exception e) {
                 log("DISCOVERY TX ERROR");
             }
@@ -574,6 +584,8 @@ public class MainActivity extends Activity {
                     }
                 }
 
+                socket.close();
+
             } catch (Exception e) {
                 log("DISCOVERY RX ERROR");
             }
@@ -589,12 +601,14 @@ public class MainActivity extends Activity {
 
                     for (String id : devices.keySet()) {
                         DeviceState d = devices.get(id);
+
                         if (d != null && now - d.lastSeen > 6000) {
                             devices.remove(id);
                             log("DEVICE OFFLINE: " + d.name);
+                            continue;
                         }
 
-                        if (d != null && now - d.lastSeen > 2000) {
+                        if (d != null && now - d.lastSeen > 2500) {
                             d.talking = false;
                         }
                     }
@@ -643,10 +657,12 @@ public class MainActivity extends Activity {
             multicastLock.acquire();
 
             PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
+
             wakeLock = pm.newWakeLock(
                     PowerManager.PARTIAL_WAKE_LOCK,
                     "wifiintercom:wakelock"
             );
+
             wakeLock.acquire();
 
         } catch (Exception ignored) {}
