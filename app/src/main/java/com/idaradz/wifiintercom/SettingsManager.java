@@ -18,13 +18,16 @@ public class SettingsManager {
 
     public SettingsManager(Context context){
 
-        prefs = context.getSharedPreferences(
-                PREFS,
-                Context.MODE_PRIVATE
-        );
+        prefs =
+                context.getSharedPreferences(
+                        PREFS,
+                        Context.MODE_PRIVATE
+                );
     }
 
-    public void setUsername(String username){
+    public void setUsername(
+            String username
+    ){
 
         prefs.edit()
                 .putString(
@@ -42,7 +45,9 @@ public class SettingsManager {
         );
     }
 
-    public void setChannel(String channel){
+    public void setChannel(
+            String channel
+    ){
 
         prefs.edit()
                 .putString(
