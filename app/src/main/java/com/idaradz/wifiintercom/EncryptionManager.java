@@ -1,16 +1,33 @@
 package com.idaradz.wifiintercom;
 
-import android.util.Base64;
-
-import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 
 import javax.crypto.Cipher;
 import javax.crypto.spec.SecretKeySpec;
 
 public class EncryptionManager {
 
-    private static final String KEY =
-            "1234567890123456";
+    private static final String SECRET =
+            "WIFI_INTERCOM_PRO_AES_KEY";
+
+    private static SecretKeySpec getKey()
+            throws Exception{
+
+        byte[] key =
+                SECRET.getBytes("UTF-8");
+
+        MessageDigest sha =
+                MessageDigest.getInstance(
+                        "SHA-256"
+                );
+
+        key = sha.digest(key);
+
+        return new SecretKeySpec(
+                key,
+                "AES"
+        );
+    }
 
     public static byte[] encrypt(
             byte[] data
@@ -19,10 +36,7 @@ public class EncryptionManager {
         try{
 
             SecretKeySpec key =
-                    new SecretKeySpec(
-                            KEY.getBytes(),
-                            "AES"
-                    );
+                    getKey();
 
             Cipher cipher =
                     Cipher.getInstance(
@@ -49,10 +63,7 @@ public class EncryptionManager {
         try{
 
             SecretKeySpec key =
-                    new SecretKeySpec(
-                            KEY.getBytes(),
-                            "AES"
-                    );
+                    getKey();
 
             Cipher cipher =
                     Cipher.getInstance(
@@ -69,50 +80,6 @@ public class EncryptionManager {
         }catch (Exception e){
 
             return data;
-        }
-    }
-
-    public static String encryptText(
-            String text
-    ){
-
-        try{
-
-            return Base64.encodeToString(
-                    encrypt(
-                            text.getBytes(
-                                    StandardCharsets.UTF_8
-                            )
-                    ),
-                    Base64.DEFAULT
-            );
-
-        }catch (Exception e){
-
-            return text;
-        }
-    }
-
-    public static String decryptText(
-            String text
-    ){
-
-        try{
-
-            byte[] decoded =
-                    Base64.decode(
-                            text,
-                            Base64.DEFAULT
-                    );
-
-            return new String(
-                    decrypt(decoded),
-                    StandardCharsets.UTF_8
-            );
-
-        }catch (Exception e){
-
-            return text;
         }
     }
 }
