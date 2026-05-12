@@ -16,9 +16,9 @@ android {
 
         targetSdk = 36
 
-        versionCode = 3
+        versionCode = 4
 
-        versionName = "3.0"
+        versionName = "4.0"
     }
 
     buildTypes {
@@ -42,4 +42,11 @@ android {
         targetCompatibility =
             JavaVersion.VERSION_17
     }
+}
+
+dependencies {
+
+    implementation("androidx.core:core:1.13.1")
+
+    implementation("androidx.appcompat:appcompat:1.7.0")
 }
