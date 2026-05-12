@@ -42,7 +42,7 @@ public class MainActivity extends Activity {
 
     private final String BROADCAST_IP = "255.255.255.255";
 
-    private final String CHANNEL = "GENERAL";
+    private String currentChannel = "GENERAL";
 
     private final String deviceName = Build.MODEL;
 
@@ -57,6 +57,8 @@ public class MainActivity extends Activity {
     private TextView status;
 
     private TextView logs;
+
+    private TextView channelText;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -74,7 +76,7 @@ public class MainActivity extends Activity {
 
         root.setOrientation(LinearLayout.VERTICAL);
 
-        root.setPadding(30,50,30,30);
+        root.setPadding(25,45,25,25);
 
         root.setBackgroundColor(
                 Color.parseColor("#EAF4FB")
@@ -88,15 +90,19 @@ public class MainActivity extends Activity {
 
         title.setTextColor(Color.BLACK);
 
-        TextView channel = new TextView(this);
+        channelText = new TextView(this);
 
-        channel.setText("📻 القناة: " + CHANNEL);
+        channelText.setText(
+                "📻 القناة الحالية: " + currentChannel
+        );
 
-        channel.setTextSize(16);
+        channelText.setTextSize(17);
 
-        channel.setTextColor(Color.parseColor("#1565C0"));
+        channelText.setTextColor(
+                Color.parseColor("#1565C0")
+        );
 
-        channel.setPadding(0,10,0,10);
+        channelText.setPadding(0,10,0,15);
 
         TextView info = new TextView(this);
 
@@ -106,7 +112,38 @@ public class MainActivity extends Activity {
 
         info.setTextColor(Color.DKGRAY);
 
-        info.setPadding(0,0,0,20);
+        info.setPadding(0,0,0,15);
+
+        LinearLayout channelsLayout =
+                new LinearLayout(this);
+
+        channelsLayout.setOrientation(
+                LinearLayout.HORIZONTAL
+        );
+
+        Button generalBtn = new Button(this);
+
+        generalBtn.setText("GENERAL");
+
+        Button kitchenBtn = new Button(this);
+
+        kitchenBtn.setText("KITCHEN");
+
+        Button securityBtn = new Button(this);
+
+        securityBtn.setText("SECURITY");
+
+        Button storageBtn = new Button(this);
+
+        storageBtn.setText("STORAGE");
+
+        channelsLayout.addView(generalBtn);
+
+        channelsLayout.addView(kitchenBtn);
+
+        channelsLayout.addView(securityBtn);
+
+        channelsLayout.addView(storageBtn);
 
         TextView online = new TextView(this);
 
@@ -114,7 +151,7 @@ public class MainActivity extends Activity {
 
         online.setTextSize(18);
 
-        online.setTextColor(Color.BLACK);
+        online.setPadding(0,20,0,10);
 
         ListView listView = new ListView(this);
 
@@ -153,20 +190,16 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams btnParams =
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
-                        240
+                        220
                 );
 
-        btnParams.setMargins(0,20,0,20);
+        btnParams.setMargins(0,15,0,20);
 
         TextView logsTitle = new TextView(this);
 
         logsTitle.setText("📜 سجل النشاط");
 
         logsTitle.setTextSize(18);
-
-        logsTitle.setTextColor(Color.BLACK);
-
-        logsTitle.setPadding(0,20,0,10);
 
         ScrollView scrollView = new ScrollView(this);
 
@@ -176,19 +209,21 @@ public class MainActivity extends Activity {
 
         logs.setTextSize(14);
 
-        logs.setPadding(20,20,20,20);
+        logs.setPadding(15,15,15,15);
 
         logs.setBackgroundColor(
-                Color.parseColor("#DDEAF5")
+                Color.parseColor("#DCEAF7")
         );
 
         scrollView.addView(logs);
 
         root.addView(title);
 
-        root.addView(channel);
+        root.addView(channelText);
 
         root.addView(info);
+
+        root.addView(channelsLayout);
 
         root.addView(online);
 
@@ -196,7 +231,7 @@ public class MainActivity extends Activity {
                 listView,
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
-                        300
+                        250
                 )
         );
 
@@ -210,13 +245,21 @@ public class MainActivity extends Activity {
                 scrollView,
                 new LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
-                        350
+                        320
                 )
         );
 
         setContentView(root);
 
-        log("تم تشغيل التطبيق");
+        log("تم تشغيل النظام");
+
+        generalBtn.setOnClickListener(v -> switchChannel("GENERAL"));
+
+        kitchenBtn.setOnClickListener(v -> switchChannel("KITCHEN"));
+
+        securityBtn.setOnClickListener(v -> switchChannel("SECURITY"));
+
+        storageBtn.setOnClickListener(v -> switchChannel("STORAGE"));
 
         startVoiceReceiver();
 
@@ -229,7 +272,7 @@ public class MainActivity extends Activity {
             if (event.getAction()
                     == MotionEvent.ACTION_DOWN) {
 
-                vibrate(60);
+                vibrate(50);
 
                 isTalking = true;
 
@@ -241,7 +284,7 @@ public class MainActivity extends Activity {
                         Color.parseColor("#D32F2F")
                 );
 
-                log("بدأ الإرسال الصوتي");
+                log("بدأ الإرسال على قناة " + currentChannel);
 
                 startVoiceSender();
 
@@ -270,6 +313,17 @@ public class MainActivity extends Activity {
 
             return true;
         });
+    }
+
+    private void switchChannel(String channel) {
+
+        currentChannel = channel;
+
+        channelText.setText(
+                "📻 القناة الحالية: " + currentChannel
+        );
+
+        log("تم التبديل إلى قناة " + channel);
     }
 
     private void log(String text) {
@@ -373,10 +427,40 @@ public class MainActivity extends Activity {
 
                     if (read > 0) {
 
+                        String header =
+                                currentChannel
+                                        + "|"
+                                        + deviceId
+                                        + "|";
+
+                        byte[] headerBytes =
+                                header.getBytes();
+
+                        byte[] finalData =
+                                new byte[
+                                        headerBytes.length + read
+                                ];
+
+                        System.arraycopy(
+                                headerBytes,
+                                0,
+                                finalData,
+                                0,
+                                headerBytes.length
+                        );
+
+                        System.arraycopy(
+                                buffer,
+                                0,
+                                finalData,
+                                headerBytes.length,
+                                read
+                        );
+
                         DatagramPacket packet =
                                 new DatagramPacket(
-                                        buffer,
-                                        read,
+                                        finalData,
+                                        finalData.length,
                                         address,
                                         VOICE_PORT
                                 );
@@ -407,7 +491,7 @@ public class MainActivity extends Activity {
 
             int sampleRate = 16000;
 
-            int bufferSize = 4096;
+            int bufferSize = 8192;
 
             AudioTrack player;
 
@@ -467,7 +551,7 @@ public class MainActivity extends Activity {
 
                 player.play();
 
-                log("مستقبل الصوت يعمل");
+                log("نظام استقبال الصوت يعمل");
 
                 while (true) {
 
@@ -479,19 +563,59 @@ public class MainActivity extends Activity {
 
                     socket.receive(packet);
 
-                    if (!isTalking) {
+                    String packetText =
+                            new String(
+                                    packet.getData(),
+                                    0,
+                                    packet.getLength()
+                            );
 
-                        player.write(
-                                packet.getData(),
-                                0,
-                                packet.getLength()
-                        );
+                    int first =
+                            packetText.indexOf("|");
+
+                    int second =
+                            packetText.indexOf(
+                                    "|",
+                                    first + 1
+                            );
+
+                    if (first > 0 && second > 0) {
+
+                        String channel =
+                                packetText.substring(
+                                        0,
+                                        first
+                                );
+
+                        String senderId =
+                                packetText.substring(
+                                        first + 1,
+                                        second
+                                );
+
+                        if (!senderId.equals(deviceId)
+                                && channel.equals(currentChannel)
+                                && !isTalking) {
+
+                            int audioStart =
+                                    second + 1;
+
+                            int audioLength =
+                                    packet.getLength()
+                                            - audioStart;
+
+                            player.write(
+                                    packet.getData(),
+                                    audioStart,
+                                    audioLength
+                            );
+                        }
                     }
                 }
 
             } catch (Exception e) {
 
-                log("خطأ في الاستقبال");
+                log("خطأ مستقبل الصوت");
 
                 e.printStackTrace();
             }
@@ -521,7 +645,9 @@ public class MainActivity extends Activity {
                             "DEVICE:"
                                     + deviceId
                                     + ":"
-                                    + deviceName;
+                                    + deviceName
+                                    + ":"
+                                    + currentChannel;
 
                     byte[] data =
                             message.getBytes();
@@ -531,7 +657,7 @@ public class MainActivity extends Activity {
                                     data,
                                     data.length,
                                     address,
-                                    55556
+                                    DISCOVERY_PORT
                             );
 
                     socket.send(packet);
@@ -542,8 +668,6 @@ public class MainActivity extends Activity {
             } catch (Exception e) {
 
                 log("خطأ اكتشاف الأجهزة");
-
-                e.printStackTrace();
             }
 
         }).start();
@@ -585,7 +709,7 @@ public class MainActivity extends Activity {
                         String[] parts =
                                 msg.split(":");
 
-                        if (parts.length >= 3) {
+                        if (parts.length >= 4) {
 
                             String incomingId =
                                     parts[1];
@@ -593,25 +717,29 @@ public class MainActivity extends Activity {
                             String incomingName =
                                     parts[2];
 
+                            String incomingChannel =
+                                    parts[3];
+
                             if (!incomingId.equals(deviceId)) {
 
                                 String finalName =
                                         "🟢 "
-                                                + incomingName;
+                                                + incomingName
+                                                + " ["
+                                                + incomingChannel
+                                                + "]";
 
                                 if (!devices.contains(finalName)) {
 
                                     runOnUiThread(() -> {
 
-                                        devices.add(
-                                                finalName
-                                        );
+                                        devices.add(finalName);
 
                                         adapter.notifyDataSetChanged();
                                     });
 
                                     log(
-                                            "تم اكتشاف جهاز: "
+                                            "تم اكتشاف "
                                                     + incomingName
                                     );
                                 }
@@ -623,8 +751,6 @@ public class MainActivity extends Activity {
             } catch (Exception e) {
 
                 log("خطأ مستقبل الأجهزة");
-
-                e.printStackTrace();
             }
 
         }).start();
