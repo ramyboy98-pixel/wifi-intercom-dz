@@ -140,7 +140,7 @@ public class MainActivity extends Activity {
                 new TextView(this);
 
         onlineDevices.setText(
-                "🟢 لا توجد أجهزة"
+                "🟢 WAITING FOR DEVICES..."
         );
 
         onlineDevices.setTextSize(15);
@@ -195,21 +195,12 @@ public class MainActivity extends Activity {
         );
 
         Button ptt =
-                new Button(this);
-
-        ptt.setText(
-                "🎙 HOLD TO TALK"
-        );
+                buildActionButton(
+                        "🎙 HOLD TO TALK",
+                        "#1E88E5"
+                );
 
         ptt.setTextSize(24);
-
-        ptt.setTextColor(Color.WHITE);
-
-        ptt.setAllCaps(false);
-
-        ptt.setBackgroundColor(
-                Color.parseColor("#1E88E5")
-        );
 
         ScrollView scroll =
                 new ScrollView(this);
@@ -258,7 +249,11 @@ public class MainActivity extends Activity {
 
         setContentView(root);
 
-        log("SYSTEM ONLINE");
+        log("VOICE ENGINE READY");
+
+        log("DISCOVERY SERVICE STARTED");
+
+        log("CHANNEL = " + currentChannel);
 
         startDiscoveryReceiver();
 
@@ -322,6 +317,27 @@ public class MainActivity extends Activity {
 
         b.setText(channel);
 
+        b.setTextSize(13);
+
+        b.setAllCaps(false);
+
+        b.setTextColor(Color.WHITE);
+
+        b.setBackgroundColor(
+                Color.parseColor("#1565C0")
+        );
+
+        LinearLayout.LayoutParams params =
+                new LinearLayout.LayoutParams(
+                        0,
+                        120,
+                        1f
+                );
+
+        params.setMargins(8,0,8,0);
+
+        b.setLayoutParams(params);
+
         b.setOnClickListener(v -> {
 
             currentChannel = channel;
@@ -330,11 +346,34 @@ public class MainActivity extends Activity {
                     "📻 " + currentChannel
             );
 
+            vibrate();
+
             log(
-                    "CHANNEL "
+                    "CHANNEL → "
                             + channel
             );
         });
+
+        return b;
+    }
+
+    private Button buildActionButton(
+            String text,
+            String color){
+
+        Button b = new Button(this);
+
+        b.setText(text);
+
+        b.setAllCaps(false);
+
+        b.setTextColor(Color.WHITE);
+
+        b.setTextSize(14);
+
+        b.setBackgroundColor(
+                Color.parseColor(color)
+        );
 
         return b;
     }
@@ -786,7 +825,7 @@ public class MainActivity extends Activity {
             if(devices.isEmpty()){
 
                 onlineDevices.setText(
-                        "🟢 لا توجد أجهزة"
+                        "🟢 WAITING FOR DEVICES..."
                 );
 
                 return;
