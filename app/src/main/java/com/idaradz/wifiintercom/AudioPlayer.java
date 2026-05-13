@@ -27,7 +27,7 @@ public class AudioPlayer {
 
         track = new AudioTrack.Builder()
                 .setAudioAttributes(new AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                         .build())
                 .setAudioFormat(new AudioFormat.Builder()
@@ -39,7 +39,10 @@ public class AudioPlayer {
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .build();
 
-        track.play();
+        if (track.getState() == AudioTrack.STATE_INITIALIZED) {
+            track.setVolume(1.0f);
+            track.play();
+        }
 
         thread = new Thread(() -> {
             while (running) {
