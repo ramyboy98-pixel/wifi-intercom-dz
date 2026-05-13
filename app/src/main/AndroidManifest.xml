@@ -11,7 +11,7 @@
     <application
         android:allowBackup="true"
         android:hardwareAccelerated="true"
-        android:label="WiFi Intercom PRO"
+        android:label="WiFi Intercom DZ"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
         android:theme="@style/AppTheme">
@@ -20,12 +20,10 @@
             android:name=".SplashActivity"
             android:exported="true"
             android:screenOrientation="portrait">
-
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
-
         </activity>
 
         <activity
