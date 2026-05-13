@@ -6,16 +6,10 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
-import android.media.AudioAttributes;
-import android.media.AudioFormat;
 import android.media.AudioManager;
-import android.media.AudioRecord;
-import android.media.AudioTrack;
 import android.media.ToneGenerator;
-import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.PowerManager;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.view.Gravity;
@@ -26,80 +20,360 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
-import java.net.DatagramPacket;
-import java.net.DatagramSocket;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.nio.charset.StandardCharsets;
-import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.Locale;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 public class MainActivity extends Activity {
 
-    private static final int AUDIO_PORT = 55555;
-    private static final int DISCOVERY_PORT = 55556;
-    private static final String BROADCAST_IP = "255.255.255.255";
-
     private SettingsManager settings;
+    private String myId;
     private String username;
     private String currentChannel;
+    private boolean darkMode;
+    private boolean isTalking = false;
 
-    private final String deviceId =
-            Build.MODEL + "_" + System.currentTimeMillis();
+    private String selectedPeerId = null;
 
-    private volatile boolean isTalking = false;
-    private volatile boolean running = true;
-
-    private String selectedDeviceId = null;
+    private AudioPlayer audioPlayer;
+    private AudioCapture audioCapture;
+    private UdpVoiceTransport voiceTransport;
+    private DiscoveryManager discoveryManager;
 
     private TextView statusView;
     private TextView channelView;
     private TextView targetView;
-    private TextView deviceBox;
+    private TextView peerBox;
     private TextView logs;
     private EditText usernameInput;
+    private LinearLayout root;
+    private LinearLayout peersList;
 
-    private final ConcurrentHashMap<String, DeviceState> devices =
-            new ConcurrentHashMap<>();
-
-    private WifiManager.MulticastLock multicastLock;
-    private PowerManager.WakeLock wakeLock;
-
-    private AudioRecord recorder;
-    private AudioTrack player;
-
-    private DatagramSocket audioSendSocket;
+    private final List<Peer> latestPeers = new ArrayList<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        requestPermissions(
-                new String[]{Manifest.permission.RECORD_AUDIO},
-                1
-        );
+        if (Build.VERSION.SDK_INT >= 23 && checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 10);
+        }
 
         settings = new SettingsManager(this);
+        myId = settings.getDeviceId();
+        if (myId == null || myId.trim().isEmpty()) {
+            myId = UUID.randomUUID().toString();
+            settings.setDeviceId(myId);
+        }
         username = settings.getUsername();
         currentChannel = settings.getChannel();
+        darkMode = settings.isDarkMode();
 
-        enableLocks();
         buildUi();
-
-        startDiscoveryReceiver();
-        startDiscoverySender();
-        startVoiceReceiver();
-        startCleanupLoop();
-
+        startCore();
         log("SYSTEM READY");
-        log("AES-GCM ACTIVE");
-        log("CHANNEL = " + currentChannel);
+        log("PCM + UDP + JITTER BUFFER ACTIVE");
+        log("ENCRYPTION TEMPORARILY OFF FOR STABILITY");
     }
 
-    private int dp(int value) {
-        return (int) (value * getResources().getDisplayMetrics().density);
+    private void startCore() {
+        audioPlayer = new AudioPlayer();
+        audioPlayer.start();
+
+        voiceTransport = new UdpVoiceTransport(myId, new UdpVoiceTransport.Listener() {
+            @Override
+            public void onAudioFrame(String senderId, String channel, byte[] pcm) {
+                if (!currentChannel.equals(channel)) return;
+                runOnUiThread(() -> setStatus("🔊 Receiving voice", false));
+                audioPlayer.push(pcm);
+            }
+
+            @Override
+            public void onAlert(String senderId, String channel) {
+                if (!currentChannel.equals(channel)) return;
+                runOnUiThread(() -> {
+                    vibrate();
+                    beep();
+                    log("ALERT RECEIVED");
+                    setStatus("📳 Alert received", false);
+                });
+            }
+
+            @Override
+            public void onLog(String message) {
+                runOnUiThread(() -> log(message));
+            }
+        });
+        voiceTransport.start();
+
+        audioCapture = new AudioCapture(this, new AudioCapture.Callback() {
+            @Override
+            public void onPcmFrame(byte[] pcm) {
+                sendVoiceFrame(pcm);
+            }
+
+            @Override
+            public void onError(String message) {
+                runOnUiThread(() -> log("AUDIO ERROR: " + message));
+            }
+        });
+
+        discoveryManager = new DiscoveryManager(this, myId, username, currentChannel, new DiscoveryManager.Listener() {
+            @Override
+            public void onPeerListChanged(Map<String, Peer> peers) {
+                runOnUiThread(() -> updatePeers(peers));
+            }
+
+            @Override
+            public void onLog(String message) {
+                runOnUiThread(() -> log(message));
+            }
+        });
+        discoveryManager.start();
+    }
+
+    private void sendVoiceFrame(byte[] pcm) {
+        if (voiceTransport == null) return;
+        Peer selected = getSelectedPeer();
+        if (selected == null) {
+            voiceTransport.sendAudio("255.255.255.255", currentChannel, "", pcm);
+        } else {
+            voiceTransport.sendAudio(selected.ip, currentChannel, selected.id, pcm);
+        }
+    }
+
+    private Peer getSelectedPeer() {
+        if (selectedPeerId == null) return null;
+        for (Peer p : latestPeers) {
+            if (p.id.equals(selectedPeerId)) return p;
+        }
+        selectedPeerId = null;
+        return null;
+    }
+
+    private void sendAlert() {
+        if (voiceTransport == null) return;
+        Peer selected = getSelectedPeer();
+        if (selected == null) {
+            voiceTransport.sendAlert("255.255.255.255", currentChannel, "");
+            log("ALERT SENT TO ALL");
+        } else {
+            voiceTransport.sendAlert(selected.ip, currentChannel, selected.id);
+            log("ALERT SENT TO " + selected.name);
+        }
+        vibrate();
+        beep();
+    }
+
+    private void startTalking() {
+        if (isTalking) return;
+        isTalking = true;
+        setStatus("🎙️ Talking...", true);
+        if (discoveryManager != null) discoveryManager.updateState(username, currentChannel, true);
+        if (audioCapture != null) audioCapture.start();
+    }
+
+    private void stopTalking() {
+        if (!isTalking) return;
+        isTalking = false;
+        if (audioCapture != null) audioCapture.stop();
+        if (discoveryManager != null) discoveryManager.updateState(username, currentChannel, false);
+        setStatus("✅ Ready", false);
+    }
+
+    private void buildUi() {
+        int pageBg = darkMode ? Color.parseColor("#101418") : Color.parseColor("#F6F8FC");
+        int cardBg = darkMode ? Color.parseColor("#1A222C") : Color.WHITE;
+        int textColor = darkMode ? Color.WHITE : Color.BLACK;
+        int subText = darkMode ? Color.parseColor("#C9D1D9") : Color.parseColor("#455A64");
+        int blue = Color.parseColor("#1565C0");
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(pageBg);
+
+        root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(18), dp(22), dp(18), dp(18));
+        root.setBackgroundColor(pageBg);
+        scroll.addView(root);
+
+        TextView title = text("📡 WiFi Intercom DZ", 30, textColor, true);
+        title.setPadding(0, 0, 0, dp(12));
+        root.addView(title);
+
+        LinearLayout userCard = card(cardBg, 22);
+        userCard.setPadding(dp(14), dp(14), dp(14), dp(14));
+
+        usernameInput = new EditText(this);
+        usernameInput.setSingleLine(true);
+        usernameInput.setText(username);
+        usernameInput.setTextSize(19);
+        usernameInput.setTextColor(textColor);
+        usernameInput.setHintTextColor(subText);
+        usernameInput.setHint("اسم الجهاز");
+        usernameInput.setPadding(dp(16), 0, dp(16), 0);
+        usernameInput.setBackground(strokeBg(darkMode ? Color.parseColor("#111820") : Color.WHITE, 1, darkMode ? Color.parseColor("#344151") : Color.parseColor("#B0BEC5"), 16));
+        userCard.addView(usernameInput, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(56)));
+
+        Button saveName = button("💾 حفظ الاسم", "#1565C0", 18, 18);
+        saveName.setOnClickListener(v -> {
+            String value = usernameInput.getText().toString().trim();
+            if (!value.isEmpty()) {
+                username = value;
+                settings.setUsername(username);
+                if (discoveryManager != null) discoveryManager.updateState(username, currentChannel, isTalking);
+                log("USERNAME SAVED: " + username);
+            }
+        });
+        userCard.addView(saveName, matchWrap(0, dp(10), 0, 0));
+        root.addView(userCard, matchWrap(0, 0, 0, dp(14)));
+
+        channelView = text("📻 Channel: " + currentChannel, 22, blue, true);
+        root.addView(channelView, matchWrap(0, 0, 0, dp(8)));
+
+        LinearLayout channels = new LinearLayout(this);
+        channels.setOrientation(LinearLayout.HORIZONTAL);
+        channels.setGravity(Gravity.CENTER);
+        String[] chs = {"GENERAL", "KITCHEN", "SECURITY"};
+        for (String ch : chs) {
+            Button b = button(ch, currentChannel.equals(ch) ? "#0D47A1" : "#607D8B", 14, 14);
+            b.setOnClickListener(v -> {
+                currentChannel = ch;
+                settings.setChannel(ch);
+                channelView.setText("📻 Channel: " + currentChannel);
+                if (discoveryManager != null) discoveryManager.updateState(username, currentChannel, isTalking);
+                log("CHANNEL = " + currentChannel);
+                rebuildOnlyUi();
+            });
+            channels.addView(b, new LinearLayout.LayoutParams(0, dp(48), 1));
+        }
+        root.addView(channels, matchWrap(0, 0, 0, dp(12)));
+
+        targetView = text("🎯 Target: ALL DEVICES", 20, textColor, true);
+        targetView.setPadding(0, dp(4), 0, dp(6));
+        root.addView(targetView);
+
+        peerBox = text("الأجهزة المتصلة ستظهر هنا", 17, subText, false);
+        peerBox.setPadding(dp(14), dp(14), dp(14), dp(14));
+        peerBox.setBackground(strokeBg(cardBg, 1, darkMode ? Color.parseColor("#334155") : Color.parseColor("#D6DDE6"), 18));
+        peerBox.setOnClickListener(v -> {
+            selectedPeerId = null;
+            targetView.setText("🎯 Target: ALL DEVICES");
+            renderPeerList();
+        });
+        root.addView(peerBox, matchWrap(0, 0, 0, dp(10)));
+
+        peersList = new LinearLayout(this);
+        peersList.setOrientation(LinearLayout.VERTICAL);
+        root.addView(peersList, matchWrap(0, 0, 0, dp(12)));
+
+        statusView = text("✅ Ready", 22, Color.parseColor("#2E7D32"), true);
+        statusView.setGravity(Gravity.CENTER);
+        statusView.setPadding(dp(12), dp(12), dp(12), dp(12));
+        statusView.setBackground(bg(cardBg, 18));
+        root.addView(statusView, matchWrap(0, 0, 0, dp(14)));
+
+        Button talkButton = button("🎙️ اضغط للتحدث", "#D32F2F", 25, 34);
+        talkButton.setOnTouchListener((v, event) -> {
+            if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                startTalking();
+                return true;
+            } else if (event.getAction() == MotionEvent.ACTION_UP || event.getAction() == MotionEvent.ACTION_CANCEL) {
+                stopTalking();
+                return true;
+            }
+            return true;
+        });
+        root.addView(talkButton, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(96)));
+
+        Button alertBtn = button("📳 إرسال تنبيه", "#F57C00", 20, 24);
+        alertBtn.setOnClickListener(v -> sendAlert());
+        root.addView(alertBtn, matchWrap(0, dp(12), 0, 0));
+
+        Button darkBtn = button(darkMode ? "☀️ الوضع الفاتح" : "🌙 الوضع الليلي", darkMode ? "#455A64" : "#263238", 18, 20);
+        darkBtn.setOnClickListener(v -> {
+            darkMode = !darkMode;
+            settings.setDarkMode(darkMode);
+            rebuildOnlyUi();
+        });
+        root.addView(darkBtn, matchWrap(0, dp(10), 0, 0));
+
+        logs = text("", 13, subText, false);
+        logs.setPadding(dp(12), dp(12), dp(12), dp(12));
+        logs.setBackground(bg(cardBg, 14));
+        root.addView(logs, matchWrap(0, dp(12), 0, 0));
+
+        setContentView(scroll);
+        renderPeerList();
+    }
+
+    private void rebuildOnlyUi() {
+        buildUi();
+        updateTargetText();
+        renderPeerList();
+    }
+
+    private void updatePeers(Map<String, Peer> peers) {
+        latestPeers.clear();
+        latestPeers.addAll(peers.values());
+        peerBox.setText(latestPeers.isEmpty() ? "لا توجد أجهزة الآن" : "عدد الأجهزة: " + latestPeers.size() + "  —  اضغط هنا للكل");
+        renderPeerList();
+    }
+
+    private void renderPeerList() {
+        if (peersList == null) return;
+        peersList.removeAllViews();
+        int cardBg = darkMode ? Color.parseColor("#1A222C") : Color.WHITE;
+        int textColor = darkMode ? Color.WHITE : Color.BLACK;
+        int border = darkMode ? Color.parseColor("#334155") : Color.parseColor("#D6DDE6");
+
+        for (Peer p : latestPeers) {
+            TextView row = text(p.display(), 16, textColor, false);
+            row.setPadding(dp(12), dp(10), dp(12), dp(10));
+            row.setBackground(strokeBg(cardBg, selectedPeerId != null && selectedPeerId.equals(p.id) ? 2 : 1, selectedPeerId != null && selectedPeerId.equals(p.id) ? Color.parseColor("#1565C0") : border, 14));
+            row.setOnClickListener(v -> {
+                selectedPeerId = p.id;
+                updateTargetText();
+                renderPeerList();
+            });
+            peersList.addView(row, matchWrap(0, 0, 0, dp(7)));
+        }
+    }
+
+    private void updateTargetText() {
+        Peer p = getSelectedPeer();
+        if (targetView == null) return;
+        if (p == null) targetView.setText("🎯 Target: ALL DEVICES");
+        else targetView.setText("🎯 Target: " + p.name);
+    }
+
+    private TextView text(String s, int sp, int color, boolean bold) {
+        TextView t = new TextView(this);
+        t.setText(s);
+        t.setTextSize(sp);
+        t.setTextColor(color);
+        if (bold) t.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        return t;
+    }
+
+    private Button button(String s, String color, int sp, int radius) {
+        Button b = new Button(this);
+        b.setText(s);
+        b.setTextSize(sp);
+        b.setAllCaps(false);
+        b.setTextColor(Color.WHITE);
+        b.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        b.setBackground(bg(Color.parseColor(color), radius));
+        return b;
+    }
+
+    private LinearLayout card(int color, int radius) {
+        LinearLayout l = new LinearLayout(this);
+        l.setOrientation(LinearLayout.VERTICAL);
+        l.setBackground(bg(color, radius));
+        return l;
     }
 
     private GradientDrawable bg(int color, int radius) {
@@ -109,1182 +383,62 @@ public class MainActivity extends Activity {
         return d;
     }
 
-    private GradientDrawable strokeBg(
-            int color,
-            int stroke,
-            int strokeColor,
-            int radius
-    ) {
+    private GradientDrawable strokeBg(int color, int stroke, int strokeColor, int radius) {
         GradientDrawable d = bg(color, radius);
         d.setStroke(dp(stroke), strokeColor);
         return d;
     }
 
-    private void buildUi() {
-
-        int pageBg = Color.parseColor("#F6F8FC");
-        int text = Color.BLACK;
-
-        ScrollView scrollPage = new ScrollView(this);
-        scrollPage.setFillViewport(true);
-        scrollPage.setBackgroundColor(pageBg);
-
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(18), dp(22), dp(18), dp(18));
-        root.setBackgroundColor(pageBg);
-
-        TextView title =
-                text("📡 WiFi Intercom PRO", 31, text, true);
-
-        title.setPadding(0, 0, 0, dp(14));
-
-        LinearLayout userRow = new LinearLayout(this);
-        userRow.setOrientation(LinearLayout.HORIZONTAL);
-        userRow.setGravity(Gravity.CENTER_VERTICAL);
-        userRow.setPadding(0, 0, 0, dp(8));
-
-        TextView avatar =
-                text("👤", 42, Color.parseColor("#1976D2"), false);
-
-        avatar.setGravity(Gravity.CENTER);
-
-        usernameInput = new EditText(this);
-        usernameInput.setText(username);
-        usernameInput.setTextSize(20);
-        usernameInput.setSingleLine(true);
-        usernameInput.setTextColor(Color.BLACK);
-        usernameInput.setHintTextColor(Color.GRAY);
-        usernameInput.setPadding(dp(16), 0, dp(16), 0);
-        usernameInput.setBackground(
-                strokeBg(
-                        Color.WHITE,
-                        1,
-                        Color.parseColor("#9E9E9E"),
-                        28
-                )
+    private LinearLayout.LayoutParams matchWrap(int l, int t, int r, int b) {
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
         );
-
-        userRow.addView(
-                avatar,
-                new LinearLayout.LayoutParams(dp(58), dp(60))
-        );
-
-        userRow.addView(
-                usernameInput,
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        dp(58)
-                )
-        );
-
-        channelView =
-                text("📻 " + currentChannel, 24, Color.parseColor("#1565C0"), false);
-
-        targetView =
-                text("🎯 Target: ALL DEVICES", 21, Color.BLACK, false);
-
-        LinearLayout saveCard = card(Color.WHITE, 16);
-        saveCard.setPadding(dp(12), dp(12), dp(12), dp(12));
-
-        EditText saveInput = new EditText(this);
-        saveInput.setHint("Username");
-        saveInput.setTextSize(22);
-        saveInput.setSingleLine(true);
-        saveInput.setTextColor(Color.BLACK);
-        saveInput.setHintTextColor(Color.GRAY);
-        saveInput.setPadding(dp(16), 0, dp(16), 0);
-        saveInput.setBackground(
-                strokeBg(
-                        Color.WHITE,
-                        1,
-                        Color.parseColor("#9E9E9E"),
-                        2
-                )
-        );
-
-        Button saveBtn =
-                button("💾  SAVE", "#1565C0", 21, 26);
-
-        saveBtn.setOnClickListener(v -> {
-
-            String value =
-                    usernameInput.getText()
-                            .toString()
-                            .trim();
-
-            if (!value.isEmpty()) {
-                username = value;
-                settings.setUsername(username);
-                saveInput.setText("");
-                log("USERNAME SAVED");
-            }
-        });
-
-        saveCard.addView(
-                saveInput,
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        dp(64)
-                )
-        );
-
-        LinearLayout.LayoutParams saveBtnParams =
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        dp(62)
-                );
-
-        saveBtnParams.setMargins(0, dp(12), 0, 0);
-        saveCard.addView(saveBtn, saveBtnParams);
-
-        LinearLayout channelsCard =
-                card(Color.parseColor("#E8EEF7"), 28);
-
-        channelsCard.setOrientation(LinearLayout.HORIZONTAL);
-        channelsCard.setPadding(dp(4), dp(4), dp(4), dp(4));
-
-        channelsCard.addView(channelButton("GENERAL"));
-        channelsCard.addView(channelButton("KITCHEN"));
-        channelsCard.addView(channelButton("SECURITY"));
-        channelsCard.addView(channelButton("STORAGE"));
-
-        LinearLayout modeCard =
-                card(Color.parseColor("#263238"), 28);
-
-        modeCard.setOrientation(LinearLayout.HORIZONTAL);
-        modeCard.setPadding(dp(2), dp(2), dp(2), dp(2));
-
-        Button light =
-                button("📡  Light", "#FFFFFF", 18, 28);
-
-        light.setTextColor(Color.BLACK);
-
-        Button darkBtn =
-                button("💡  Dark", "#263238", 18, 28);
-
-        light.setOnClickListener(v -> {
-            settings.setDarkMode(false);
-            buildUi();
-            log("LIGHT MODE");
-        });
-
-        darkBtn.setOnClickListener(v -> {
-            settings.setDarkMode(true);
-            buildUi();
-            log("DARK MODE");
-        });
-
-        modeCard.addView(
-                light,
-                new LinearLayout.LayoutParams(0, dp(58), 1f)
-        );
-
-        modeCard.addView(
-                darkBtn,
-                new LinearLayout.LayoutParams(0, dp(58), 1f)
-        );
-
-        TextView onlineTitle =
-                text("🟢 ONLINE DEVICES", 22, Color.BLACK, false);
-
-        onlineTitle.setPadding(0, dp(8), 0, dp(8));
-
-        LinearLayout deviceCard =
-                card(Color.WHITE, 10);
-
-        deviceBox =
-                text("No devices online", 19, Color.BLACK, false);
-
-        deviceBox.setTypeface(Typeface.MONOSPACE);
-        deviceBox.setPadding(dp(16), dp(14), dp(16), dp(14));
-
-        deviceCard.addView(
-                deviceBox,
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        dp(150)
-                )
-        );
-
-        deviceCard.setOnClickListener(v -> {
-            selectedDeviceId = null;
-            targetView.setText("🎯 Target: ALL DEVICES");
-            log("TARGET = ALL");
-        });
-
-        statusView =
-                text("🟢  READY", 30, Color.BLACK, false);
-
-        statusView.setGravity(Gravity.CENTER);
-        statusView.setBackground(
-                strokeBg(
-                        Color.parseColor("#E8F8EA"),
-                        1,
-                        Color.parseColor("#4CAF50"),
-                        12
-                )
-        );
-
-        Button ptt =
-                button("🎙  HOLD TO TALK", "#C91414", 30, 10);
-
-        ptt.setOnTouchListener((v, event) -> {
-
-            if (event.getAction() == MotionEvent.ACTION_DOWN) {
-                startTalking();
-                return true;
-            }
-
-            if (event.getAction() == MotionEvent.ACTION_UP ||
-                    event.getAction() == MotionEvent.ACTION_CANCEL) {
-                stopTalking();
-                return true;
-            }
-
-            return true;
-        });
-
-        logs = text("", 16, Color.BLACK, false);
-        logs.setTypeface(Typeface.MONOSPACE);
-        logs.setPadding(dp(14), dp(14), dp(14), dp(14));
-        logs.setBackground(
-                bg(Color.parseColor("#EEF3FA"), 10)
-        );
-
-        add(root, title);
-        add(root, userRow);
-        add(root, channelView);
-        add(root, targetView);
-        add(root, saveCard);
-        add(root, channelsCard);
-        add(root, modeCard);
-        add(root, onlineTitle);
-        add(root, deviceCard);
-
-        LinearLayout.LayoutParams statusParams =
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        dp(88)
-                );
-
-        statusParams.setMargins(0, dp(12), 0, dp(12));
-        root.addView(statusView, statusParams);
-
-        LinearLayout.LayoutParams pttParams =
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        dp(116)
-                );
-
-        pttParams.setMargins(0, dp(8), 0, dp(16));
-        root.addView(ptt, pttParams);
-
-        root.addView(
-                logs,
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        dp(210)
-                )
-        );
-
-        scrollPage.addView(root);
-        setContentView(scrollPage);
+        p.setMargins(l, t, r, b);
+        return p;
     }
 
-    private void add(LinearLayout root, android.view.View view) {
-
-        LinearLayout.LayoutParams p =
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                );
-
-        p.setMargins(0, 0, 0, dp(10));
-        root.addView(view, p);
+    private int dp(int value) {
+        return (int) (value * getResources().getDisplayMetrics().density);
     }
 
-    private LinearLayout card(int color, int radius) {
-        LinearLayout box = new LinearLayout(this);
-        box.setOrientation(LinearLayout.VERTICAL);
-        box.setBackground(bg(color, radius));
-        return box;
+    private void setStatus(String s, boolean danger) {
+        if (statusView == null) return;
+        statusView.setText(s);
+        statusView.setTextColor(danger ? Color.parseColor("#D32F2F") : Color.parseColor("#2E7D32"));
     }
 
-    private TextView text(
-            String value,
-            int size,
-            int color,
-            boolean bold
-    ) {
-        TextView t = new TextView(this);
-        t.setText(value);
-        t.setTextSize(size);
-        t.setTextColor(color);
-
-        if (bold) {
-            t.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        }
-
-        return t;
-    }
-
-    private Button button(
-            String value,
-            String color,
-            int size,
-            int radius
-    ) {
-        Button b = new Button(this);
-        b.setText(value);
-        b.setTextSize(size);
-        b.setAllCaps(false);
-        b.setTextColor(Color.WHITE);
-        b.setBackground(
-                bg(Color.parseColor(color), radius)
-        );
-        return b;
-    }
-
-    private Button channelButton(String channel) {
-
-        boolean active =
-                channel.equals(currentChannel);
-
-        Button b =
-                button(
-                        channel,
-                        active ? "#405A8A" : "#E8EEF7",
-                        14,
-                        24
-                );
-
-        b.setTextColor(active ? Color.WHITE : Color.BLACK);
-
-        LinearLayout.LayoutParams p =
-                new LinearLayout.LayoutParams(
-                        0,
-                        dp(52),
-                        1f
-                );
-
-        p.setMargins(dp(3), 0, dp(3), 0);
-        b.setLayoutParams(p);
-
-        b.setOnClickListener(v -> {
-            currentChannel = channel;
-            settings.setChannel(channel);
-            channelView.setText("📻 " + currentChannel);
-            buildUi();
-            log("CHANNEL = " + currentChannel);
-        });
-
-        return b;
-    }
-
-    private void startTalking() {
-
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO)
-                != PackageManager.PERMISSION_GRANTED) {
-
-            log("MIC PERMISSION REQUIRED");
-            return;
-        }
-
-        if (isTalking) {
-            return;
-        }
-
-        isTalking = true;
-
-        beepStart();
-        vibrate();
-
-        statusView.setText("🔴  TALKING");
-        statusView.setBackground(
-                strokeBg(
-                        Color.parseColor("#FFE1E1"),
-                        1,
-                        Color.RED,
-                        12
-                )
-        );
-
-        recorder = AudioEngine.createRecorder();
-
-        new Thread(() -> {
-
-            try {
-
-                recorder.startRecording();
-
-                byte[] buffer =
-                        new byte[AudioEngine.AUDIO_CHUNK];
-
-                while (isTalking) {
-
-                    int read =
-                            recorder.read(
-                                    buffer,
-                                    0,
-                                    buffer.length
-                            );
-
-                    if (read > 0) {
-
-                        byte[] raw =
-                                new byte[read];
-
-                        System.arraycopy(
-                                buffer,
-                                0,
-                                raw,
-                                0,
-                                read
-                        );
-
-                        sendAudio(raw);
-                    }
-                }
-
-            } catch (Exception e) {
-
-                log("TX ERROR");
-            }
-
-        }).start();
-
-        log("TX START");
-    }
-
-    private void stopTalking() {
-
-        if (!isTalking) {
-            return;
-        }
-
-        isTalking = false;
-
-        beepStop();
-
-        try {
-
-            if (recorder != null) {
-                recorder.stop();
-                recorder.release();
-                recorder = null;
-            }
-
-        } catch (Exception ignored) {}
-
-        statusView.setText("🟢  READY");
-        statusView.setBackground(
-                strokeBg(
-                        Color.parseColor("#E8F8EA"),
-                        1,
-                        Color.parseColor("#4CAF50"),
-                        12
-                )
-        );
-
-        log("TX STOP");
-    }
-
-    private InetAddress getTargetAddress()
-            throws Exception {
-
-        if (selectedDeviceId != null &&
-                devices.containsKey(selectedDeviceId)) {
-
-            return InetAddress.getByName(
-                    devices.get(selectedDeviceId).ip
-            );
-        }
-
-        return InetAddress.getByName(BROADCAST_IP);
-    }
-
-    private void sendAudio(byte[] rawAudio) {
-
-        try {
-
-            if (audioSendSocket == null ||
-                    audioSendSocket.isClosed()) {
-
-                audioSendSocket =
-                        new DatagramSocket();
-
-                audioSendSocket.setBroadcast(true);
-            }
-
-            byte[] encrypted =
-                    EncryptionManager.encrypt(rawAudio);
-
-            String header =
-                    "AUD|"
-                            + currentChannel
-                            + "|"
-                            + deviceId
-                            + "|"
-                            + username
-                            + "|";
-
-            byte[] h =
-                    header.getBytes(
-                            StandardCharsets.UTF_8
-                    );
-
-            byte[] packetData =
-                    new byte[h.length + encrypted.length];
-
-            System.arraycopy(
-                    h,
-                    0,
-                    packetData,
-                    0,
-                    h.length
-            );
-
-            System.arraycopy(
-                    encrypted,
-                    0,
-                    packetData,
-                    h.length,
-                    encrypted.length
-            );
-
-            DatagramPacket packet =
-                    new DatagramPacket(
-                            packetData,
-                            packetData.length,
-                            getTargetAddress(),
-                            AUDIO_PORT
-                    );
-
-            audioSendSocket.send(packet);
-
-        } catch (Exception e) {
-
-            log("SEND ERROR");
-        }
-    }
-
-    private void startVoiceReceiver() {
-
-        new Thread(() -> {
-
-            try {
-
-                int bufferSize = 16384;
-
-                player =
-                        new AudioTrack.Builder()
-                                .setAudioAttributes(
-                                        new AudioAttributes.Builder()
-                                                .setUsage(
-                                                        AudioAttributes.USAGE_MEDIA
-                                                )
-                                                .setContentType(
-                                                        AudioAttributes.CONTENT_TYPE_SPEECH
-                                                )
-                                                .build()
-                                )
-                                .setAudioFormat(
-                                        new AudioFormat.Builder()
-                                                .setEncoding(
-                                                        AudioFormat.ENCODING_PCM_16BIT
-                                                )
-                                                .setSampleRate(
-                                                        AudioEngine.SAMPLE_RATE
-                                                )
-                                                .setChannelMask(
-                                                        AudioFormat.CHANNEL_OUT_MONO
-                                                )
-                                                .build()
-                                )
-                                .setBufferSizeInBytes(bufferSize)
-                                .build();
-
-                DatagramSocket socket =
-                        new DatagramSocket(null);
-
-                socket.setReuseAddress(true);
-
-                socket.bind(
-                        new InetSocketAddress(AUDIO_PORT)
-                );
-
-                byte[] buffer =
-                        new byte[32768];
-
-                player.play();
-
-                while (running) {
-
-                    DatagramPacket packet =
-                            new DatagramPacket(
-                                    buffer,
-                                    buffer.length
-                            );
-
-                    socket.receive(packet);
-
-                    parseAudioPacket(packet);
-                }
-
-            } catch (Exception e) {
-
-                log("RX ERROR");
-            }
-
-        }).start();
-    }
-
-    private void parseAudioPacket(DatagramPacket packet) {
-
-        try {
-
-            byte[] data =
-                    new byte[packet.getLength()];
-
-            System.arraycopy(
-                    packet.getData(),
-                    0,
-                    data,
-                    0,
-                    packet.getLength()
-            );
-
-            int[] bars =
-                    findBars(data, 4);
-
-            if (bars == null) {
-                return;
-            }
-
-            String type =
-                    new String(
-                            data,
-                            0,
-                            bars[0],
-                            StandardCharsets.UTF_8
-                    );
-
-            if (!type.equals("AUD")) {
-                return;
-            }
-
-            String channel =
-                    new String(
-                            data,
-                            bars[0] + 1,
-                            bars[1] - bars[0] - 1,
-                            StandardCharsets.UTF_8
-                    );
-
-            String senderId =
-                    new String(
-                            data,
-                            bars[1] + 1,
-                            bars[2] - bars[1] - 1,
-                            StandardCharsets.UTF_8
-                    );
-
-            String senderName =
-                    new String(
-                            data,
-                            bars[2] + 1,
-                            bars[3] - bars[2] - 1,
-                            StandardCharsets.UTF_8
-                    );
-
-            if (senderId.equals(deviceId)) {
-                return;
-            }
-
-            if (!channel.equals(currentChannel)) {
-                return;
-            }
-
-            if (isTalking) {
-                return;
-            }
-
-            int audioStart =
-                    bars[3] + 1;
-
-            byte[] encrypted =
-                    new byte[data.length - audioStart];
-
-            System.arraycopy(
-                    data,
-                    audioStart,
-                    encrypted,
-                    0,
-                    encrypted.length
-            );
-
-            byte[] audio =
-                    EncryptionManager.decrypt(encrypted);
-
-            player.write(audio, 0, audio.length);
-
-            DeviceState d =
-                    devices.get(senderId);
-
-            if (d != null) {
-
-                d.talking = true;
-                d.lastSeen =
-                        System.currentTimeMillis();
-
-                updateDeviceList();
-            }
-
-            runOnUiThread(() -> {
-                statusView.setText(
-                        "🔊  RECEIVING: " + senderName
-                );
-
-                statusView.setBackground(
-                        strokeBg(
-                                Color.parseColor("#FFF8D6"),
-                                1,
-                                Color.parseColor("#FBC02D"),
-                                12
-                        )
-                );
-            });
-
-        } catch (Exception ignored) {}
-    }
-
-    private int[] findBars(byte[] data, int count) {
-
-        int[] result =
-                new int[count];
-
-        int found = 0;
-
-        for (int i = 0;
-             i < data.length && found < count;
-             i++) {
-
-            if (data[i] == '|') {
-                result[found] = i;
-                found++;
-            }
-        }
-
-        return found == count ? result : null;
-    }
-
-    private void startDiscoverySender() {
-
-        new Thread(() -> {
-
-            try {
-
-                DatagramSocket socket =
-                        new DatagramSocket();
-
-                socket.setBroadcast(true);
-
-                InetAddress address =
-                        InetAddress.getByName(BROADCAST_IP);
-
-                while (running) {
-
-                    String message =
-                            "DISC|"
-                                    + deviceId
-                                    + "|"
-                                    + username
-                                    + "|"
-                                    + currentChannel
-                                    + "|"
-                                    + isTalking;
-
-                    byte[] data =
-                            message.getBytes(
-                                    StandardCharsets.UTF_8
-                            );
-
-                    DatagramPacket packet =
-                            new DatagramPacket(
-                                    data,
-                                    data.length,
-                                    address,
-                                    DISCOVERY_PORT
-                            );
-
-                    socket.send(packet);
-
-                    Thread.sleep(1500);
-                }
-
-                socket.close();
-
-            } catch (Exception e) {
-
-                log("DISCOVERY TX ERROR");
-            }
-
-        }).start();
-    }
-
-    private void startDiscoveryReceiver() {
-
-        new Thread(() -> {
-
-            try {
-
-                DatagramSocket socket =
-                        new DatagramSocket(null);
-
-                socket.setReuseAddress(true);
-
-                socket.bind(
-                        new InetSocketAddress(DISCOVERY_PORT)
-                );
-
-                byte[] buffer =
-                        new byte[2048];
-
-                while (running) {
-
-                    DatagramPacket packet =
-                            new DatagramPacket(
-                                    buffer,
-                                    buffer.length
-                            );
-
-                    socket.receive(packet);
-
-                    String msg =
-                            new String(
-                                    packet.getData(),
-                                    0,
-                                    packet.getLength(),
-                                    StandardCharsets.UTF_8
-                            );
-
-                    if (!msg.startsWith("DISC|")) {
-                        continue;
-                    }
-
-                    String[] p =
-                            msg.split("\\|");
-
-                    if (p.length >= 5) {
-
-                        String id = p[1];
-                        String name = p[2];
-                        String channel = p[3];
-
-                        boolean talking =
-                                Boolean.parseBoolean(p[4]);
-
-                        String ip =
-                                packet.getAddress()
-                                        .getHostAddress();
-
-                        if (!id.equals(deviceId)) {
-
-                            DeviceState existing =
-                                    devices.get(id);
-
-                            if (existing == null) {
-
-                                devices.put(
-                                        id,
-                                        new DeviceState(
-                                                id,
-                                                name,
-                                                channel,
-                                                ip,
-                                                talking
-                                        )
-                                );
-
-                                log("DEVICE ONLINE: " + name);
-
-                            } else {
-
-                                existing.name = name;
-                                existing.channel = channel;
-                                existing.ip = ip;
-                                existing.talking = talking;
-                                existing.lastSeen =
-                                        System.currentTimeMillis();
-                            }
-
-                            updateDeviceList();
-                        }
-                    }
-                }
-
-            } catch (Exception e) {
-
-                log("DISCOVERY RX ERROR");
-            }
-
-        }).start();
-    }
-
-    private void startCleanupLoop() {
-
-        new Thread(() -> {
-
-            while (running) {
-
-                try {
-
-                    long now =
-                            System.currentTimeMillis();
-
-                    for (String id : devices.keySet()) {
-
-                        DeviceState d =
-                                devices.get(id);
-
-                        if (d != null &&
-                                now - d.lastSeen > 6000) {
-
-                            devices.remove(id);
-
-                            log("DEVICE OFFLINE: " + d.name);
-
-                            continue;
-                        }
-
-                        if (d != null &&
-                                now - d.lastSeen > 2500) {
-
-                            d.talking = false;
-                        }
-                    }
-
-                    updateDeviceList();
-
-                    Thread.sleep(2000);
-
-                } catch (Exception ignored) {}
-            }
-
-        }).start();
-    }
-
-    private void updateDeviceList() {
-
-        runOnUiThread(() -> {
-
-            if (devices.isEmpty()) {
-
-                deviceBox.setText("No devices online");
-
-                return;
-            }
-
-            StringBuilder builder =
-                    new StringBuilder();
-
-            for (DeviceState d : devices.values()) {
-
-                builder.append(d.display())
-                        .append("\n");
-            }
-
-            deviceBox.setText(
-                    builder.toString()
-            );
-
-            if (!isTalking) {
-
-                statusView.setText("🟢  READY");
-
-                statusView.setBackground(
-                        strokeBg(
-                                Color.parseColor("#E8F8EA"),
-                                1,
-                                Color.parseColor("#4CAF50"),
-                                12
-                        )
-                );
-            }
-        });
-    }
-
-    private void enableLocks() {
-
-        try {
-
-            WifiManager wifi =
-                    (WifiManager)
-                            getApplicationContext()
-                                    .getSystemService(
-                                            WIFI_SERVICE
-                                    );
-
-            multicastLock =
-                    wifi.createMulticastLock(
-                            "wifi_intercom_multicast"
-                    );
-
-            multicastLock.setReferenceCounted(true);
-            multicastLock.acquire();
-
-            PowerManager pm =
-                    (PowerManager)
-                            getSystemService(
-                                    POWER_SERVICE
-                            );
-
-            wakeLock =
-                    pm.newWakeLock(
-                            PowerManager.PARTIAL_WAKE_LOCK,
-                            "wifiintercom:wakelock"
-                    );
-
-            wakeLock.acquire();
-
-        } catch (Exception ignored) {}
-    }
-
-    private void beepStart() {
-
-        try {
-
-            ToneGenerator tone =
-                    new ToneGenerator(
-                            AudioManager.STREAM_MUSIC,
-                            80
-                    );
-
-            tone.startTone(
-                    ToneGenerator.TONE_PROP_BEEP,
-                    120
-            );
-
-        } catch (Exception ignored) {}
-    }
-
-    private void beepStop() {
-
-        try {
-
-            ToneGenerator tone =
-                    new ToneGenerator(
-                            AudioManager.STREAM_MUSIC,
-                            60
-                    );
-
-            tone.startTone(
-                    ToneGenerator.TONE_PROP_ACK,
-                    80
-            );
-
-        } catch (Exception ignored) {}
+    private void log(String s) {
+        if (logs == null) return;
+        String old = logs.getText().toString();
+        String line = "• " + s + "\n";
+        logs.setText(line + old);
     }
 
     private void vibrate() {
-
         try {
-
-            Vibrator vibrator =
-                    (Vibrator)
-                            getSystemService(
-                                    VIBRATOR_SERVICE
-                            );
-
-            if (vibrator == null) {
-                return;
-            }
-
-            if (Build.VERSION.SDK_INT
-                    >= Build.VERSION_CODES.O) {
-
-                vibrator.vibrate(
-                        VibrationEffect.createOneShot(
-                                60,
-                                VibrationEffect.DEFAULT_AMPLITUDE
-                        )
-                );
-
-            } else {
-
-                vibrator.vibrate(60);
-            }
-
-        } catch (Exception ignored) {}
+            Vibrator v = (Vibrator) getSystemService(VIBRATOR_SERVICE);
+            if (v == null) return;
+            if (Build.VERSION.SDK_INT >= 26) v.vibrate(VibrationEffect.createOneShot(180, VibrationEffect.DEFAULT_AMPLITUDE));
+            else v.vibrate(180);
+        } catch (Exception ignored) {
+        }
     }
 
-    private void log(String text) {
-
-        runOnUiThread(() -> {
-
-            if (logs == null) {
-                return;
-            }
-
-            String time =
-                    new SimpleDateFormat(
-                            "HH:mm:ss",
-                            Locale.getDefault()
-                    ).format(new Date());
-
-            logs.append(
-                    "[" + time + "] "
-                            + text
-                            + "\n"
-            );
-        });
+    private void beep() {
+        try {
+            ToneGenerator tone = new ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80);
+            tone.startTone(ToneGenerator.TONE_PROP_BEEP, 120);
+        } catch (Exception ignored) {
+        }
     }
 
     @Override
     protected void onDestroy() {
-
-        running = false;
-
         stopTalking();
-
-        try {
-
-            if (player != null) {
-                player.stop();
-                player.release();
-            }
-
-        } catch (Exception ignored) {}
-
-        try {
-
-            if (audioSendSocket != null) {
-                audioSendSocket.close();
-            }
-
-        } catch (Exception ignored) {}
-
-        try {
-
-            if (multicastLock != null &&
-                    multicastLock.isHeld()) {
-
-                multicastLock.release();
-            }
-
-        } catch (Exception ignored) {}
-
-        try {
-
-            if (wakeLock != null &&
-                    wakeLock.isHeld()) {
-
-                wakeLock.release();
-            }
-
-        } catch (Exception ignored) {}
-
+        if (audioPlayer != null) audioPlayer.stop();
+        if (voiceTransport != null) voiceTransport.stop();
+        if (discoveryManager != null) discoveryManager.stop();
         super.onDestroy();
     }
 }
