@@ -33,6 +33,7 @@ public class MainActivity extends Activity {
     private String currentChannel;
     private boolean darkMode;
     private boolean isTalking = false;
+    private AudioManager audioManager;
 
     private String selectedPeerId = null;
 
@@ -60,6 +61,8 @@ public class MainActivity extends Activity {
             requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 10);
         }
 
+        forceSpeakerOutput();
+
         settings = new SettingsManager(this);
         myId = settings.getDeviceId();
         if (myId == null || myId.trim().isEmpty()) {
@@ -77,7 +80,31 @@ public class MainActivity extends Activity {
         log("ENCRYPTION TEMPORARILY OFF FOR STABILITY");
     }
 
+
+    private void forceSpeakerOutput() {
+        try {
+            audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
+            if (audioManager != null) {
+                audioManager.setMode(AudioManager.MODE_IN_COMMUNICATION);
+                audioManager.setSpeakerphoneOn(true);
+
+                int maxMusic = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+                int currentMusic = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
+                int wantedMusic = Math.max(currentMusic, Math.max(1, maxMusic / 2));
+                audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, wantedMusic, 0);
+
+                int maxVoice = audioManager.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL);
+                int currentVoice = audioManager.getStreamVolume(AudioManager.STREAM_VOICE_CALL);
+                int wantedVoice = Math.max(currentVoice, Math.max(1, maxVoice / 2));
+                audioManager.setStreamVolume(AudioManager.STREAM_VOICE_CALL, wantedVoice, 0);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
     private void startCore() {
+        forceSpeakerOutput();
+
         audioPlayer = new AudioPlayer();
         audioPlayer.start();
 
@@ -438,6 +465,12 @@ public class MainActivity extends Activity {
         stopTalking();
         if (audioPlayer != null) audioPlayer.stop();
         if (voiceTransport != null) voiceTransport.stop();
+        try {
+            if (audioManager != null) {
+                audioManager.setSpeakerphoneOn(false);
+                audioManager.setMode(AudioManager.MODE_NORMAL);
+            }
+        } catch (Exception ignored) {}
         if (discoveryManager != null) discoveryManager.stop();
         super.onDestroy();
     }
