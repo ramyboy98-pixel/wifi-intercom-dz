@@ -6,6 +6,7 @@ import android.content.SharedPreferences;
 public class SettingsManager {
 
     private static final String PREFS = "wifi_intercom_settings";
+    private static final String DEVICE_ID = "device_id";
     private static final String USERNAME = "username";
     private static final String CHANNEL = "channel";
     private static final String DARK = "dark";
@@ -14,6 +15,14 @@ public class SettingsManager {
 
     public SettingsManager(Context context) {
         prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    public void setDeviceId(String value) {
+        prefs.edit().putString(DEVICE_ID, value).apply();
+    }
+
+    public String getDeviceId() {
+        return prefs.getString(DEVICE_ID, "");
     }
 
     public void setUsername(String username) {
@@ -37,6 +46,6 @@ public class SettingsManager {
     }
 
     public boolean isDarkMode() {
-        return prefs.getBoolean(DARK, true);
+        return prefs.getBoolean(DARK, false);
     }
 }
